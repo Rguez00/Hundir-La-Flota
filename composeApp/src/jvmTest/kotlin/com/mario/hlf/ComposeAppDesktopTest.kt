@@ -1,4 +1,4 @@
-package org.example.project
+package com.mario.hlf
 
 import kotlin.test.Test
 import kotlin.test.assertEquals

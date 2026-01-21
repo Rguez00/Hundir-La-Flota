@@ -4,41 +4,50 @@ plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
-    alias(libs.plugins.composeHotReload)
+    alias(libs.plugins.kotlinSerialization)
 }
 
 kotlin {
     jvm()
-    
+
     sourceSets {
         commonMain.dependencies {
-            implementation(libs.compose.runtime)
-            implementation(libs.compose.foundation)
-            implementation(libs.compose.material3)
-            implementation(libs.compose.ui)
-            implementation(libs.compose.components.resources)
-            implementation(libs.compose.uiToolingPreview)
-            implementation(libs.androidx.lifecycle.viewmodelCompose)
-            implementation(libs.androidx.lifecycle.runtimeCompose)
+            implementation(libs.composeRuntime)
+            implementation(libs.composeFoundation)
+            implementation(libs.composeMaterial3)
+            implementation(libs.composeUi)
+            implementation(libs.composeResources)
+            implementation(libs.composeUiToolingPreview)
+
+            implementation(libs.lifecycleViewmodelCompose)
+            implementation(libs.lifecycleRuntimeCompose)
+
+            implementation(libs.kotlinxSerializationJsonLib)
         }
+
+        jvmTest.dependencies {
+            implementation(kotlin("test-junit"))
+            implementation(libs.junit)
+        }
+
         commonTest.dependencies {
-            implementation(libs.kotlin.test)
+            implementation(libs.kotlinTest)
         }
+
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
-            implementation(libs.kotlinx.coroutinesSwing)
+            implementation(libs.kotlinxCoroutinesSwing)
         }
     }
 }
 
-
 compose.desktop {
     application {
-        mainClass = "org.example.project.MainKt"
+        mainClass = "com.mario.hlf.MainKt"
 
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
-            packageName = "org.example.project"
+            targetFormats(TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Dmg)
+            packageName = "com.mario.hlf"
             packageVersion = "1.0.0"
         }
     }
