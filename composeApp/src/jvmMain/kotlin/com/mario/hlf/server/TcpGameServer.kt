@@ -9,7 +9,10 @@ class TcpGameServer(
     private val config: ServerConfig,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val sessions: SessionRegistry = SessionRegistry(),
-    private val rooms: RoomRegistry = RoomRegistry()
+    private val rooms: RoomRegistry = RoomRegistry(),
+    private val connections: ConnectionRegistry = ConnectionRegistry(),
+    private val games: GameService = GameService(),
+    private val router: MessageRouter = MessageRouter(sessions, rooms, games)
 ) {
     private val running = AtomicBoolean(false)
     private var serverSocket: ServerSocket? = null
@@ -46,7 +49,9 @@ class TcpGameServer(
                                 config = config,
                                 clientId = session.clientId,
                                 sessions = sessions,
-                                rooms = rooms
+                                rooms = rooms,
+                                connections = connections,
+                                router = router
                             ).run()
                         } finally {
                             sessions.remove(session.clientId)
@@ -58,6 +63,8 @@ class TcpGameServer(
             } catch (t: Throwable) {
                 if (running.get()) log("Server accept loop error: ${t.message}")
             } finally {
+                // si el loop cae, cerramos el socket por seguridad
+                try { ss.close() } catch (_: Throwable) {}
                 log("Server stopped.")
             }
         }

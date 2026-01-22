@@ -62,4 +62,9 @@ class RoomRegistry {
             room.players.remove(clientId)
         }
     }
+    fun getRoomByGameId(gameId: GameId): Room? =
+        rooms.values.firstOrNull { it.gameId == gameId }
+
+    fun getRoom(roomId: RoomId): Room? = rooms[roomId.value]
+
 }

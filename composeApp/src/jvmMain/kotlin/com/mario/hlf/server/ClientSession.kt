@@ -16,7 +16,9 @@ class ClientSession(
     private val config: ServerConfig,
     private val clientId: ClientId,
     private val sessions: SessionRegistry,
-    private val rooms: RoomRegistry
+    private val rooms: RoomRegistry,
+    private val connections: ConnectionRegistry,
+    private val router: MessageRouter
 ) {
 
     suspend fun run() {
@@ -24,72 +26,81 @@ class ClientSession(
             val input = s.getInputStream()
             val output = s.getOutputStream()
 
-            while (true) {
-                val frame = Framing.readFrame(input) ?: break
-                val json = frame.toString(Charsets.UTF_8)
+            connections.register(clientId, output)
 
-                val env = ProtocolJson.decodeFromString(Envelope.serializer(), json)
-                val responseEnv = handle(env)
+            try {
+                while (true) {
+                    val frame = Framing.readFrame(input) ?: break
+                    val json = frame.toString(Charsets.UTF_8)
 
-                val outJson = ProtocolJson.encodeToString(Envelope.serializer(), responseEnv)
-                Framing.writeFrame(output, outJson.toByteArray(Charsets.UTF_8))
+                    val env = ProtocolJson.decodeFromString(Envelope.serializer(), json)
+
+                    // Handshake se queda aquí (fase 5.2)
+                    if (env.payload is Hello) {
+                        val responseEnv = handleHello(env)
+                        connections.sendTo(clientId, responseEnv)
+                        continue
+                    }
+
+                    // Resto de mensajes -> router (fase 5.3.2)
+                    val dispatches = router.handle(clientId, env)
+                    for (d in dispatches) {
+                        connections.sendTo(d.target, d.envelope)
+                    }
+                }
+            } finally {
+                connections.unregister(clientId)
             }
         }
     }
 
-    private suspend fun handle(env: Envelope): Envelope {
-        return when (val payload = env.payload) {
-            is Hello -> {
-                // 1) Guardar nombre en sesión
-                sessions.update(clientId) {
-                    it.copy(playerName = payload.playerName, status = SessionStatus.CONNECTED)
-                }
+    private suspend fun handleHello(env: Envelope): Envelope {
+        val payload = env.payload as Hello
 
-                // 2) Emparejar / crear room
-                val join = rooms.joinOrCreate(clientId)
-
-                // 3) Actualizar sesión con room/game/slot
-                val status = if (join.roomStatus == RoomStatus.READY) SessionStatus.IN_GAME else SessionStatus.WAITING
-                val updated = sessions.update(clientId) {
-                    it.copy(
-                        status = status,
-                        roomId = join.roomId,
-                        gameId = join.gameId,
-                        slot = join.slot
-                    )
-                }
-
-                val welcome = Welcome(
-                    serverVersion = "1.0",
-                    config = ServerConfigDto(
-                        host = config.host,
-                        port = config.port,
-                        maxClients = config.maxClients
-                    ),
-                    records = RecordsDto()
-                )
-
-                Envelope(
-                    v = env.v,
-                    requestId = env.requestId ?: UUID.randomUUID().toString(),
-                    // 👇 Fuente de verdad: lo que tenga la sesión tras el join
-                    gameId = updated.gameId?.value,
-                    payload = welcome
-                )
-            }
-
-            else -> {
-                val err = ErrorMsg(
-                    code = "UNSUPPORTED",
-                    message = "En FASE 5.2 solo se soporta HELLO. Requests de juego en 5.3."
-                )
-                Envelope(
-                    v = env.v,
-                    requestId = env.requestId ?: UUID.randomUUID().toString(),
-                    gameId = env.gameId,
-                    payload = err
-                )
-            }
+        // 1) Guardar nombre en sesión
+        sessions.update(clientId) {
+            it.copy(playerName = payload.playerName, status = SessionStatus.CONNECTED)
         }
+
+        // 2) Emparejar / crear room
+        val join = rooms.joinOrCreate(clientId)
+
+        // 3) Actualizar sesión con room/game/slot
+        val status = if (join.roomStatus == RoomStatus.READY) SessionStatus.IN_GAME else SessionStatus.WAITING
+        val updated = sessions.update(clientId) {
+            it.copy(
+                status = status,
+                roomId = join.roomId,
+                gameId = join.gameId,
+                slot = join.slot
+            )
+        }
+
+        val welcome = Welcome(
+            serverVersion = "1.0",
+            config = ServerConfigDto(
+                host = config.host,
+                port = config.port,
+                maxClients = config.maxClients
+            ),
+            records = RecordsDto()
+        )
+
+        return Envelope(
+            v = env.v,
+            requestId = env.requestId ?: UUID.randomUUID().toString(),
+            gameId = updated.gameId?.value,
+            payload = welcome
+        )
     }
+
+    // (Opcional) Si quieres mantenerlo, pero ahora mismo no lo usamos:
+    @Suppress("unused")
+    private fun unsupported(env: Envelope, msg: String): Envelope =
+        Envelope(
+            v = env.v,
+            requestId = env.requestId ?: UUID.randomUUID().toString(),
+            gameId = env.gameId,
+            payload = ErrorMsg(code = "UNSUPPORTED", message = msg)
+        )
 }
