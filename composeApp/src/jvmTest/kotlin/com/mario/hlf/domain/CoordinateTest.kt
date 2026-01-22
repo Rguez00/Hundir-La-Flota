@@ -1,14 +1,21 @@
 package com.mario.hlf.domain.model
 
 import kotlin.test.Test
-import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class CoordinateTest {
 
     @Test
-    fun `coordinate guarda fila y columna`() {
-        val c = Coordinate(row = 3, col = 7)
-        assertEquals(3, c.row)
-        assertEquals(7, c.col)
+    fun `coordinate inside board returns true`() {
+        assertTrue(Coordinate(0, 0).isInside(10))
+        assertTrue(Coordinate(9, 9).isInside(10))
+    }
+
+    @Test
+    fun `coordinate outside board returns false`() {
+        assertFalse(Coordinate(-1, 0).isInside(10))
+        assertFalse(Coordinate(10, 0).isInside(10))
+        assertFalse(Coordinate(0, 10).isInside(10))
     }
 }

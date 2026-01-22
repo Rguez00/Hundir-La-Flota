@@ -19,14 +19,14 @@ class Board(private val size: Int = 10, private val allowAdjacency: Boolean = fa
     }
 
     fun cellAt(c: Coordinate): CellState {
-        require(c.isInside(size)) { "Out of bounds" }
+        if (!c.isInside(size)) throw DomainError.OutOfBounds()
         return grid[c.row][c.col]
     }
 
     fun placeShip(start: Coordinate, type: ShipType, orientation: Orientation) {
         if (!start.isInside(size)) throw DomainError.OutOfBounds()
 
-        val cells = buildShipCells(start, type.size, orientation)
+        val cells = ShipPlacement(start, orientation, type).cells().toList()
 
         // bounds
         if (cells.any { !it.isInside(size) }) throw DomainError.OutOfBounds()
@@ -71,15 +71,6 @@ class Board(private val size: Int = 10, private val allowAdjacency: Boolean = fa
     }
 
     fun allShipsSunk(): Boolean = ships.isNotEmpty() && ships.all { it.isSunk() }
-
-    private fun buildShipCells(start: Coordinate, length: Int, orientation: Orientation): List<Coordinate> {
-        return (0 until length).map { i ->
-            when (orientation) {
-                Orientation.HORIZONTAL -> Coordinate(start.row, start.col + i)
-                Orientation.VERTICAL -> Coordinate(start.row + i, start.col)
-            }
-        }
-    }
 
     private fun neighborsIncludingDiagonal(c: Coordinate): List<Coordinate> {
         val deltas = listOf(-1, 0, 1)
