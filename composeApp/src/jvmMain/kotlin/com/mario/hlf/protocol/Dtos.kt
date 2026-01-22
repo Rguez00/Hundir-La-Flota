@@ -39,3 +39,12 @@ data class ModeStatsDto(
 data class MetaDto(
     val version: Int = 1
 )
+
+@Serializable
+enum class PlayerId { P1, P2 }
+
+@Serializable
+enum class OrientationId { HORIZONTAL, VERTICAL }
+
+@Serializable
+enum class ShipTypeId { CARRIER, BATTLESHIP, CRUISER, SUBMARINE, DESTROYER }
