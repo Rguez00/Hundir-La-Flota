@@ -1,14 +1,11 @@
 package com.mario.hlf.server
 
 import com.mario.hlf.network.Framing
-import com.mario.hlf.protocol.Envelope
-import com.mario.hlf.protocol.ErrorMsg
-import com.mario.hlf.protocol.Hello
-import com.mario.hlf.protocol.ProtocolJson
-import com.mario.hlf.protocol.RecordsDto
-import com.mario.hlf.protocol.ServerConfigDto
-import com.mario.hlf.protocol.Welcome
+import com.mario.hlf.protocol.*
+import java.io.EOFException
+import java.io.InputStream
 import java.net.Socket
+import java.net.SocketException
 import java.util.UUID
 
 class ClientSession(
@@ -30,35 +27,44 @@ class ClientSession(
 
             try {
                 while (true) {
-                    val frame = Framing.readFrame(input) ?: break
-                    val json = frame.toString(Charsets.UTF_8)
+                    val env = readEnvelopeOrNull(input) ?: break
 
-                    val env = ProtocolJson.decodeFromString(Envelope.serializer(), json)
+                    when (env.payload) {
+                        is Hello -> {
+                            val responseEnv = handleHello(env)
+                            connections.sendTo(clientId, responseEnv)
+                        }
 
-                    // Handshake se queda aquí (fase 5.2)
-                    if (env.payload is Hello) {
-                        val responseEnv = handleHello(env)
-                        connections.sendTo(clientId, responseEnv)
-                        continue
-                    }
-
-                    // Resto de mensajes -> router (fase 5.3+)
-                    val dispatches = router.handle(clientId, env)
-                    for (d in dispatches) {
-                        connections.sendTo(d.target, d.envelope)
+                        else -> {
+                            val dispatches = router.handle(clientId, env)
+                            for (d in dispatches) {
+                                connections.sendTo(d.target, d.envelope)
+                            }
+                        }
                     }
                 }
             } finally {
-                // cleanup completo (evita leaks)
-                connections.unregister(clientId)
-
-                // OJO: si tu RoomRegistry.removeClient es suspend (como te pasé), esto compila tal cual.
-                // Si aún lo tienes no-suspend, quita el suspend y funcionará igual.
-                rooms.removeClient(clientId)
-
-                sessions.remove(clientId)
+                // cleanup idempotente
+                try { connections.unregister(clientId) } catch (_: Throwable) {}
+                try { rooms.removeClient(clientId) } catch (_: Throwable) {}
+                try { sessions.remove(clientId) } catch (_: Throwable) {}
             }
         }
+    }
+
+    private fun readEnvelopeOrNull(input: InputStream): Envelope? {
+        val frame = try {
+            Framing.readFrame(input)
+        } catch (_: EOFException) {
+            return null
+        } catch (_: SocketException) {
+            return null
+        }
+
+        if (frame == null) return null
+
+        val json = frame.toString(Charsets.UTF_8)
+        return ProtocolJson.decodeFromString(Envelope.serializer(), json)
     }
 
     private suspend fun handleHello(env: Envelope): Envelope {

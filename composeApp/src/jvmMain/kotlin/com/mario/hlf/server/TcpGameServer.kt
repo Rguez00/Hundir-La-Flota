@@ -1,16 +1,17 @@
 package com.mario.hlf.server
 
 import kotlinx.coroutines.*
-import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.net.Socket
 import java.net.SocketException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 
 class TcpGameServer(
     private val config: ServerConfig,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    private val ownsScope: Boolean = true, // si te pasan un scope externo => false
     private val sessions: SessionRegistry = SessionRegistry(),
     private val rooms: RoomRegistry = RoomRegistry(),
     private val connections: ConnectionRegistry = ConnectionRegistry(),
@@ -18,8 +19,11 @@ class TcpGameServer(
     private val router: MessageRouter = MessageRouter(sessions, rooms, games)
 ) {
     private val running = AtomicBoolean(false)
-    private val activeClients = AtomicInteger(0)
     private var serverSocket: ServerSocket? = null
+    private var acceptJob: Job? = null
+
+    private val clientJobs = ConcurrentHashMap<String, Job>()
+    private val clientSockets = ConcurrentHashMap<String, Socket>()
 
     fun start() {
         check(!running.get()) { "Server already started" }
@@ -31,51 +35,50 @@ class TcpGameServer(
 
         log("Server listening on ${config.host}:${config.port} (maxClients=${config.maxClients})")
 
-        scope.launch {
+        acceptJob = scope.launch {
             try {
                 while (running.get()) {
-                    val socket = ss.accept()
+                    val socket = try {
+                        ss.accept()
+                    } catch (_: SocketException) {
+                        break // normal al cerrar ServerSocket en stop()
+                    }
 
-                    // guard maxClients (usa contador real de activos)
-                    if (activeClients.get() >= config.maxClients) {
+                    if (sessions.count() >= config.maxClients) {
                         log("Rejecting client: SERVER_FULL")
                         try { socket.close() } catch (_: Throwable) {}
                         continue
                     }
 
-                    // Reservamos plaza antes de lanzar la sesión
-                    activeClients.incrementAndGet()
-
                     val session = sessions.create()
-                    log("Client connected: ${socket.inetAddress.hostAddress}:${socket.port} -> clientId=${session.clientId.value}")
+                    val clientId = session.clientId
+                    clientSockets[clientId.value] = socket
 
-                    launch {
+                    log("Client connected: ${socket.inetAddress.hostAddress}:${socket.port} -> clientId=${clientId.value}")
+
+                    val job = scope.launch {
                         try {
                             ClientSession(
                                 socket = socket,
                                 config = config,
-                                clientId = session.clientId,
+                                clientId = clientId,
                                 sessions = sessions,
                                 rooms = rooms,
                                 connections = connections,
                                 router = router
                             ).run()
-                        } catch (t: Throwable) {
-                            // Si quieres, aquí puedes loguear errores por cliente (sin tumbar el server)
-                            log("Client session error (clientId=${session.clientId.value}): ${t.message}")
                         } finally {
-                            // Cleanup aquí SOLO del contador.
-                            // La limpieza de sessions/rooms/connections vive en ClientSession.finally (versión final).
-                            activeClients.decrementAndGet()
-                            log("Client disconnected: clientId=${session.clientId.value}")
+                            clientSockets.remove(clientId.value)
+                            connections.unregister(clientId)
+                            rooms.removeClient(clientId)
+                            sessions.remove(clientId)
+                            log("Client disconnected: clientId=${clientId.value}")
                         }
                     }
+
+                    clientJobs[clientId.value] = job
+                    job.invokeOnCompletion { clientJobs.remove(clientId.value) }
                 }
-            } catch (e: SocketException) {
-                // típico cuando paramos y cerramos el ServerSocket
-                if (running.get()) log("Server socket error: ${e.message}")
-            } catch (e: IOException) {
-                if (running.get()) log("Server IO error: ${e.message}")
             } catch (t: Throwable) {
                 if (running.get()) log("Server accept loop error: ${t.message}")
             } finally {
@@ -85,10 +88,40 @@ class TcpGameServer(
         }
     }
 
-    fun stop() {
+    /**
+     * ✅ Mantiene compatibilidad con TODOS los tests actuales.
+     * Internamente ejecuta la parada suspend.
+     */
+    fun stop() = runBlocking { stopAsync() }
+
+    /**
+     * ✅ Para UI/coroutines (no bloquea hilo).
+     */
+    suspend fun stopAsync() {
         if (!running.getAndSet(false)) return
+
+        // 1) desbloquear accept()
         try { serverSocket?.close() } catch (_: Throwable) {}
-        scope.cancel()
+        serverSocket = null
+
+        // 2) parar accept loop
+        try { acceptJob?.cancelAndJoin() } catch (_: Throwable) {}
+        acceptJob = null
+
+        // 3) cerrar sockets clientes => desbloquea readFrame()
+        clientSockets.values.toList().forEach { s ->
+            try { s.close() } catch (_: Throwable) {}
+        }
+        clientSockets.clear()
+
+        // 4) cancelar/esperar handlers
+        clientJobs.values.toList().forEach { job ->
+            try { job.cancelAndJoin() } catch (_: Throwable) {}
+        }
+        clientJobs.clear()
+
+        // 5) solo cancelamos scope si es nuestro
+        if (ownsScope) scope.cancel()
     }
 
     private fun log(msg: String) = println("[SERVER] $msg")
