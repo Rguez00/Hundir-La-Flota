@@ -1,7 +1,19 @@
 package com.mario.hlf
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberWindowState
 
 fun main() = application {
-    App(onExit = { exitApplication() })
+    val windowState = rememberWindowState()
+
+    Window(
+        onCloseRequest = { exitApplication() },
+        title = "Hundir la Flota",
+        state = windowState
+    ) {
+        // App *dentro* del Window => ya existen los CompositionLocals necesarios
+        App(onExit = { exitApplication() })
+    }
 }
