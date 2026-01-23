@@ -6,6 +6,7 @@ import com.mario.hlf.protocol.GameStateDto
 sealed interface GameUiState {
     data object Disconnected : GameUiState
     data class Connecting(val host: String, val port: Int, val name: String) : GameUiState
+
     data class Connected(
         val host: String,
         val port: Int,

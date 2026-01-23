@@ -4,12 +4,8 @@ import java.io.EOFException
 import java.io.InputStream
 import java.io.OutputStream
 
-/**
- * Framing binario: [len:Int32 big-endian] + [payload bytes]
- * - readFrame() devuelve null si el stream se cierra limpiamente.
- */
 object Framing {
-    private const val MAX_FRAME_BYTES = 1024 * 1024 // 1MB para evitar OOM
+    private const val MAX_FRAME_BYTES = 1024 * 1024
 
     fun readFrame(input: InputStream): ByteArray? {
         val lenBuf = ByteArray(4)
@@ -19,7 +15,8 @@ object Framing {
 
         if (n < 4) {
             try {
-                readFully(input, lenBuf, n, 4)
+                // ✅ solo faltan (4 - n)
+                readFully(input, lenBuf, n, 4 - n)
             } catch (_: EOFException) {
                 return null
             }
@@ -41,7 +38,6 @@ object Framing {
         return payload
     }
 
-
     fun writeFrame(output: OutputStream, payload: ByteArray) {
         val len = payload.size
         require(len <= MAX_FRAME_BYTES) { "Frame too large: $len" }
@@ -50,7 +46,7 @@ object Framing {
             ((len ushr 24) and 0xFF).toByte(),
             ((len ushr 16) and 0xFF).toByte(),
             ((len ushr 8) and 0xFF).toByte(),
-            (len and 0xFF).toByte(),
+            (len and 0xFF).toByte()
         )
 
         output.write(lenBuf)

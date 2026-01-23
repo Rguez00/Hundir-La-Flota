@@ -26,41 +26,42 @@ class RoomRegistry {
     // roomId -> Room
     private val rooms = ConcurrentHashMap<String, Room>()
 
-    // gameId -> roomId (índice)
+    // gameId -> roomId
     private val roomIdByGameId = ConcurrentHashMap<String, String>()
 
-    // roomId de la sala en espera (0 o 1 jugador)
+    // clientId -> roomId (para borrar en O(1))
+    private val roomIdByClientId = ConcurrentHashMap<String, String>()
+
+    // roomId de la sala en espera
     private var waitingRoomId: RoomId? = null
 
     suspend fun joinOrCreate(clientId: ClientId): JoinResult = mutex.withLock {
-        val existingWaiting = waitingRoomId?.let { rooms[it.value] }
+        // Si el cliente ya estaba en una sala (reconnect raro), lo limpiamos primero
+        roomIdByClientId[clientId.value]?.let { existingRoomId ->
+            rooms[existingRoomId]?.players?.remove(clientId)
+            roomIdByClientId.remove(clientId.value)
+        }
 
-        val room = if (
-            existingWaiting == null ||
-            existingWaiting.status != RoomStatus.WAITING ||
-            existingWaiting.players.size >= 2
-        ) {
+        val waiting = waitingRoomId?.let { rooms[it.value] }
+        val room = if (waiting == null || waiting.status != RoomStatus.WAITING || waiting.players.size >= 2) {
             val newRoom = Room(roomId = newRoomId(), gameId = newGameId())
             rooms[newRoom.roomId.value] = newRoom
             roomIdByGameId[newRoom.gameId.value] = newRoom.roomId.value
             waitingRoomId = newRoom.roomId
             newRoom
         } else {
-            existingWaiting
+            waiting
         }
 
-        // evitar duplicados (por seguridad)
         if (clientId !in room.players) {
             room.players.add(clientId)
+            roomIdByClientId[clientId.value] = room.roomId.value
         }
 
-        // slot asignado por orden de entrada (1 o 2)
         val slot = room.players.indexOf(clientId) + 1
 
-        // actualizar estado de la sala
         room.status = if (room.players.size >= 2) RoomStatus.READY else RoomStatus.WAITING
 
-        // si ya está READY, ya no hay waiting room
         if (room.status == RoomStatus.READY && waitingRoomId == room.roomId) {
             waitingRoomId = null
         }
@@ -74,29 +75,28 @@ class RoomRegistry {
     }
 
     suspend fun removeClient(clientId: ClientId) = mutex.withLock {
-        // snapshot para evitar iterar mientras se muta el map
-        val snapshot = rooms.values.toList()
+        val rid = roomIdByClientId.remove(clientId.value) ?: return@withLock
+        val room = rooms[rid] ?: return@withLock
 
-        for (room in snapshot) {
-            if (room.players.remove(clientId)) {
-                room.status = if (room.players.size >= 2) RoomStatus.READY else RoomStatus.WAITING
+        room.players.remove(clientId)
+        room.status = if (room.players.size >= 2) RoomStatus.READY else RoomStatus.WAITING
 
-                if (room.players.isEmpty()) {
-                    rooms.remove(room.roomId.value)
-                    roomIdByGameId.remove(room.gameId.value)
-                    if (waitingRoomId == room.roomId) waitingRoomId = null
-                } else {
-                    if (room.status == RoomStatus.WAITING && waitingRoomId == null) {
-                        waitingRoomId = room.roomId
-                    }
-                }
+        if (room.players.isEmpty()) {
+            rooms.remove(room.roomId.value)
+            roomIdByGameId.remove(room.gameId.value)
+            if (waitingRoomId == room.roomId) waitingRoomId = null
+        } else {
+            // si queda alguien solo, esa sala pasa a ser la waiting si no había otra
+            if (room.status == RoomStatus.WAITING) {
+                val w = waitingRoomId
+                if (w == null || rooms[w.value] == null) waitingRoomId = room.roomId
             }
         }
 
+        // limpieza extra por si waiting apuntaba a sala borrada
         val w = waitingRoomId
         if (w != null && rooms[w.value] == null) waitingRoomId = null
     }
-
 
     suspend fun getRoomByGameId(gameId: GameId): Room? = mutex.withLock {
         val roomId = roomIdByGameId[gameId.value] ?: return@withLock null

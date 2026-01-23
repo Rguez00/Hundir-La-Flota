@@ -8,6 +8,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlin.coroutines.CoroutineContext
 
 class GameController(
     private val scope: CoroutineScope
@@ -16,47 +17,58 @@ class GameController(
     private var api: GameTcpClient? = null
     private var loop: GameEventLoopClient? = null
 
-    // gameId actual (lo da el server en WELCOME)
     private var currentGameId: String? = null
 
-    // jobs de bindings para no duplicar collectors
     private var bindLatestJob: Job? = null
     private var bindGameOverJob: Job? = null
 
     private val _uiState = MutableStateFlow<GameUiState>(GameUiState.Disconnected)
     val uiState: StateFlow<GameUiState> = _uiState
 
-    fun connect(host: String, port: Int, name: String) {
-        _uiState.value = GameUiState.Connecting(host, port, name)
+    // ✅ Scope REAL para red/IO (evita bloquear UI)
+    private val ioScope = CoroutineScope(scope.coroutineContext + Dispatchers.IO)
 
-        scope.launch(Dispatchers.IO) {
+    fun connect(host: String, port: Int, name: String) {
+        // UI -> Connecting siempre en Main
+        scope.launch(Dispatchers.Main) {
+            _uiState.value = GameUiState.Connecting(host, port, name)
+        }
+
+        ioScope.launch {
             try {
-                // por si había algo previo
                 safeCloseAll()
 
                 val c = TcpClientConnection.connect(host, port)
-                c.setReadTimeout(0) // lectura infinita (se corta cerrando socket)
                 conn = c
 
                 val a = GameTcpClient(c)
                 api = a
 
-                a.hello(playerName = name)
-                val gid = requireNotNull(a.gameId) { "Server did not provide gameId" }
+                // ✅ Handshake antes del loop (solo hay 1 lector aquí)
+                val gid = a.hello(playerName = name)
                 currentGameId = gid
 
-                val l = GameEventLoopClient(a, scope)
+                // ✅ lectura infinita para el loop
+                c.setReadTimeout(0)
+
+                // ✅ Loop leyendo SIEMPRE en IO
+                val l = GameEventLoopClient(a, ioScope)
                 loop = l
                 l.start()
 
-                // ✅ bind flows justo después de arrancar loop
+                // ✅ Collectors pueden vivir en scope (Main) sin bloquear,
+                // porque solo consumen StateFlows, no hacen I/O
                 bindStateFlows(l)
 
-                _uiState.value = GameUiState.Connected(host, port, name, gid)
-
+                // ✅ Cambiar pantalla SIEMPRE en Main
+                withContext(Dispatchers.Main) {
+                    _uiState.value = GameUiState.Connected(host, port, name, gid)
+                }
             } catch (t: Throwable) {
                 safeCloseAll()
-                _uiState.value = GameUiState.Error(t.message ?: "Connect error")
+                withContext(Dispatchers.Main) {
+                    _uiState.value = GameUiState.Error(t.toString())
+                }
             }
         }
     }
@@ -73,10 +85,6 @@ class GameController(
         api?.sendShoot(player, row, col)
     }
 
-    /**
-     * ✅ Idempotente: cancela collectors anteriores y crea unos nuevos para ESTE loop.
-     * Se llama SOLO desde connect() cuando ya existe loop.
-     */
     private fun bindStateFlows(l: GameEventLoopClient) {
         bindLatestJob?.cancel()
         bindGameOverJob?.cancel()
@@ -85,20 +93,13 @@ class GameController(
             l.latestState.collect { st ->
                 if (st != null) {
                     _uiState.update { prev ->
-                        val prevGameId = when (prev) {
+                        val gid = when (prev) {
                             is GameUiState.Connected -> prev.gameId
                             is GameUiState.InGame -> prev.gameId
-                            else -> null
+                            else -> currentGameId ?: "UNKNOWN"
                         }
-
-                        val gid = prevGameId ?: currentGameId ?: "UNKNOWN"
                         val prevGameOver = (prev as? GameUiState.InGame)?.gameOver
-
-                        GameUiState.InGame(
-                            gameId = gid,
-                            state = st,
-                            gameOver = prevGameOver
-                        )
+                        GameUiState.InGame(gameId = gid, state = st, gameOver = prevGameOver)
                     }
                 }
             }
@@ -116,22 +117,16 @@ class GameController(
         }
     }
 
-    /**
-     * ✅ No suspend: usable desde UI directamente.
-     */
     fun disconnect() {
-        scope.launch(Dispatchers.IO) {
+        ioScope.launch {
             safeCloseAll()
-            _uiState.value = GameUiState.Disconnected
+            withContext(Dispatchers.Main) {
+                _uiState.value = GameUiState.Disconnected
+            }
         }
     }
 
-    /**
-     * ✅ Suspend porque loop.stop() es suspend.
-     * Idempotente.
-     */
     private suspend fun safeCloseAll() {
-        // parar collectors primero
         bindLatestJob?.cancel()
         bindGameOverJob?.cancel()
         bindLatestJob = null

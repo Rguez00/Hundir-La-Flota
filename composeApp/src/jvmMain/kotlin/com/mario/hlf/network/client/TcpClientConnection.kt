@@ -8,6 +8,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -20,6 +21,9 @@ class TcpClientConnection private constructor(
 
     private val writeLock = ReentrantLock()
     private val closed = AtomicBoolean(false)
+
+    // Debug: detecta doble lector
+    private val reading = AtomicBoolean(false)
 
     companion object {
         fun connect(host: String, port: Int, connectTimeoutMs: Int = 1500): TcpClientConnection {
@@ -50,17 +54,44 @@ class TcpClientConnection private constructor(
     }
 
     fun receive(): Envelope {
-        val frame = Framing.readFrame(input) ?: throw IllegalStateException("EOF while waiting for frame")
-        val json = frame.toString(Charsets.UTF_8)
-        return ProtocolJson.decodeFromString(Envelope.serializer(), json)
+        check(reading.compareAndSet(false, true)) {
+            "Multiple concurrent receive() calls detected. Only one reader per socket is allowed."
+        }
+
+        try {
+            val frame = Framing.readFrame(input)
+                ?: throw IllegalStateException("EOF while waiting for frame")
+
+            val json = frame.toString(Charsets.UTF_8)
+
+            return ProtocolJson.decodeFromString(Envelope.serializer(), json)
+        } finally {
+            reading.set(false)
+        }
+    }
+
+    fun receiveWithTimeoutForHandshake(timeoutMs: Int): Envelope {
+        val prev = socket.soTimeout
+        return try {
+            socket.soTimeout = timeoutMs
+            receive()
+        } catch (t: SocketTimeoutException) {
+            throw IllegalStateException("Timeout waiting for server response ($timeoutMs ms)", t)
+        } finally {
+            socket.soTimeout = prev
+        }
     }
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
 
-        // Cerramos streams primero para desbloquear lecturas/escrituras bloqueantes
-        try { input.close() } catch (_: Throwable) {}
-        try { output.close() } catch (_: Throwable) {}
-        try { socket.close() } catch (_: Throwable) {}
+        // ✅ shutdown ayuda muchísimo a desbloquear reads en Windows
+        runCatching { socket.shutdownInput() }
+        runCatching { socket.shutdownOutput() }
+        runCatching { socket.close() }
+
+        // Streams por si acaso (pueden ya estar cerrados)
+        runCatching { input.close() }
+        runCatching { output.close() }
     }
 }

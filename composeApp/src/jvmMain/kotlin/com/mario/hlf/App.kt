@@ -41,31 +41,37 @@ fun App(onExit: () -> Unit) {
 
             is GameUiState.InGame -> {
                 val st = s.state
-                when (st.phase) {
-                    PhaseId.PLACEMENT -> PlacementScreenStub(
-                        stateInfo = "PLACEMENT (turn=${st.currentTurn})",
-                        onPlaceDemo = {
-                            controller.placeShip(
-                                player = PlayerId.P1,
-                                row = 0,
-                                col = 0,
-                                ship = ShipTypeId.DESTROYER,
-                                orientation = OrientationId.HORIZONTAL
-                            )
-                        }
-                    )
 
-                    PhaseId.BATTLE -> BattleScreenStub(
-                        stateInfo = "BATTLE (turn=${st.currentTurn})",
-                        onShootDemo = { controller.shoot(player = PlayerId.P1, row = 0, col = 0) }
-                    )
+                Column(
+                    Modifier.fillMaxSize().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Text("Fase: ${st.phase} | Turno: ${st.currentTurn}", style = MaterialTheme.typography.titleMedium)
 
-                    PhaseId.OVER -> GameOverScreen(
-                        winner = s.gameOver?.winner,   // nullable OK
-                        onExit = { controller.disconnect() }
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                        com.mario.hlf.ui.components.BoardGrid(
+                            title = "Mi Flota",
+                            board = st.self,
+                            onCellClick = null // en placement lo haremos con selector
+                        )
+
+                        com.mario.hlf.ui.components.BoardGrid(
+                            title = "Radar",
+                            board = st.opponent,
+                            onCellClick = { r, c ->
+                                // Solo disparar en BATTLE (por ahora dejamos que el server valide también)
+                                controller.shoot(player = PlayerId.P1, row = r, col = c)
+                            }
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(onClick = { controller.startGame() }) { Text("START_GAME") }
+                        OutlinedButton(onClick = { controller.disconnect() }) { Text("Desconectar") }
+                    }
                 }
             }
+
 
             is GameUiState.Error -> ErrorScreen(
                 message = s.message,

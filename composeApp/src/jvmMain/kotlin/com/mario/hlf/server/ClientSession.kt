@@ -4,6 +4,7 @@ import com.mario.hlf.network.Framing
 import com.mario.hlf.protocol.*
 import java.io.EOFException
 import java.io.InputStream
+import java.io.OutputStream
 import java.net.Socket
 import java.net.SocketException
 import java.util.UUID
@@ -17,22 +18,27 @@ class ClientSession(
     private val connections: ConnectionRegistry,
     private val router: MessageRouter
 ) {
-
     suspend fun run() {
+        log("session started clientId=${clientId.value}")
+
         socket.use { s ->
             val input = s.getInputStream()
             val output = s.getOutputStream()
 
+            // ✅ registrar SIEMPRE desde el principio
             connections.register(clientId, output)
 
             try {
                 while (true) {
-                    val env = readEnvelopeOrNull(input) ?: break
+                    log("waiting frame... clientId=${clientId.value}")
+                    val env = safeReadEnvelopeOrNull(input) ?: break
+                    log("received ${env.payload::class.simpleName} reqId=${env.requestId} gameId=${env.gameId}")
 
                     when (env.payload) {
                         is Hello -> {
                             val responseEnv = handleHello(env)
-                            connections.sendTo(clientId, responseEnv)
+                            writeEnvelope(output, responseEnv)
+                            log("sent Welcome reqId=${responseEnv.requestId} gameId=${responseEnv.gameId}")
                         }
 
                         else -> {
@@ -44,27 +50,41 @@ class ClientSession(
                     }
                 }
             } finally {
-                // cleanup idempotente
-                try { connections.unregister(clientId) } catch (_: Throwable) {}
-                try { rooms.removeClient(clientId) } catch (_: Throwable) {}
-                try { sessions.remove(clientId) } catch (_: Throwable) {}
+                runCatching { connections.unregister(clientId) }
+                runCatching { rooms.removeClient(clientId) }
+                runCatching { sessions.remove(clientId) }
+                log("session closed clientId=${clientId.value}")
             }
         }
     }
 
-    private fun readEnvelopeOrNull(input: InputStream): Envelope? {
+    private fun safeReadEnvelopeOrNull(input: InputStream): Envelope? {
         val frame = try {
             Framing.readFrame(input)
         } catch (_: EOFException) {
             return null
         } catch (_: SocketException) {
             return null
+        } catch (t: Throwable) {
+            log("readFrame error: ${t.message}")
+            return null
         }
 
         if (frame == null) return null
 
         val json = frame.toString(Charsets.UTF_8)
-        return ProtocolJson.decodeFromString(Envelope.serializer(), json)
+        return try {
+            ProtocolJson.decodeFromString(Envelope.serializer(), json)
+        } catch (t: Throwable) {
+            log("decode error: ${t.message} raw=$json")
+            null
+        }
+    }
+
+    private fun writeEnvelope(output: OutputStream, env: Envelope) {
+        val json = ProtocolJson.encodeToString(Envelope.serializer(), env)
+        Framing.writeFrame(output, json.toByteArray(Charsets.UTF_8))
+        runCatching { output.flush() }
     }
 
     private suspend fun handleHello(env: Envelope): Envelope {
@@ -75,7 +95,7 @@ class ClientSession(
             it.copy(playerName = payload.playerName, status = SessionStatus.CONNECTED)
         }
 
-        // 2) Emparejar / crear room
+        // 2) Join / create room
         val join = rooms.joinOrCreate(clientId)
 
         // 3) Actualizar sesión con room/game/slot
@@ -89,6 +109,7 @@ class ClientSession(
             )
         }
 
+        // 4) Respuesta
         val welcome = Welcome(
             serverVersion = "1.0",
             config = ServerConfigDto(
@@ -107,12 +128,5 @@ class ClientSession(
         )
     }
 
-    @Suppress("unused")
-    private fun unsupported(env: Envelope, msg: String): Envelope =
-        Envelope(
-            v = env.v,
-            requestId = env.requestId ?: UUID.randomUUID().toString(),
-            gameId = env.gameId,
-            payload = ErrorMsg(code = "UNSUPPORTED", message = msg)
-        )
+    private fun log(msg: String) = println("[SERVER] $msg")
 }

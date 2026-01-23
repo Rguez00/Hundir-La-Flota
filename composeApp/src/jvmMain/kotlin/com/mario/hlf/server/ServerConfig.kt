@@ -13,7 +13,7 @@ data class ServerConfig(
 
             val stream = Thread.currentThread().contextClassLoader
                 .getResourceAsStream(resourceName)
-                ?: error("No se encontró $resourceName en resources/composeResources")
+                ?: error("No se encontró $resourceName en el classpath (asegúrate de tenerlo en src/jvmMain/resources)")
 
             stream.use { props.load(it) }
 
