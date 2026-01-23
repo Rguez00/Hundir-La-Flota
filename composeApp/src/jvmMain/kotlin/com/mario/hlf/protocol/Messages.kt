@@ -18,7 +18,8 @@ sealed interface ServerMsg : Msg
 @SerialName("HELLO")
 data class Hello(
     val clientVersion: String,
-    val playerName: String
+    val playerName: String,
+    val mode: GameModeId = GameModeId.PVP // ✅ NUEVO: cliente especifica modo deseado
 ) : ClientMsg
 
 @Serializable
@@ -28,15 +29,24 @@ data class Welcome(
     val config: ServerConfigDto,
     val records: RecordsDto,
 
-    // NUEVO (compatibles hacia atrás)
+    // Info de la sala
     val roomId: String = "",
     val slot: PlayerId = PlayerId.P1,
-    val roomStatus: RoomStatusId = RoomStatusId.WAITING
+    val roomStatus: RoomStatusId = RoomStatusId.WAITING,
+    val mode: GameModeId = GameModeId.PVP // ✅ NUEVO: servidor confirma modo de juego
 ) : ServerMsg
 
 @Serializable
-enum class RoomStatusId { WAITING, READY }
+enum class RoomStatusId {
+    WAITING,  // Esperando segundo jugador (PVP) o listo para empezar (PVE)
+    READY     // Sala completa, puede iniciar partida
+}
 
+@Serializable
+enum class GameModeId {
+    PVP,  // Player vs Player
+    PVE   // Player vs Environment (IA)
+}
 
 // --- Errores ---
 
@@ -89,13 +99,31 @@ data class GameStateEvent(
 @SerialName("GAME_OVER")
 data class GameOverEvent(
     val gameId: String,
-    val winner: PlayerId
+    val winner: PlayerId,
+    val reason: GameOverReason = GameOverReason.ALL_SHIPS_SUNK // ✅ NUEVO: razón del fin
 ) : ServerMsg
+
+@Serializable
+enum class GameOverReason {
+    ALL_SHIPS_SUNK,      // Victoria normal
+    OPPONENT_DISCONNECTED, // Rival abandonó
+    TIMEOUT               // Tiempo agotado (futuro)
+}
 
 @Serializable
 @SerialName("ROOM_UPDATE")
 data class RoomUpdateEvent(
     val roomId: String,
     val roomStatus: RoomStatusId,
-    val players: Int
+    val players: Int, // Número de jugadores humanos (1 en PVE, 2 en PVP)
+    val mode: GameModeId = GameModeId.PVP // ✅ NUEVO: modo de la sala
+) : ServerMsg
+
+// ✅ NUEVO: Notificación de desconexión de jugador
+@Serializable
+@SerialName("PLAYER_DISCONNECTED")
+data class PlayerDisconnectedEvent(
+    val gameId: String,
+    val player: PlayerId,
+    val reason: String = "Connection lost"
 ) : ServerMsg

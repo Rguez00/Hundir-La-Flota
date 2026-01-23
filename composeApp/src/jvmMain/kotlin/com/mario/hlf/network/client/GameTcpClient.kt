@@ -15,12 +15,12 @@ class GameTcpClient(private val conn: TcpClientConnection) : Closeable {
     private fun requireGameId(): String = requireNotNull(gameId) { "No gameId. Call hello() first." }
 
     /**
-     * ✅ Handshake: devuelve Welcome (config/records + lobby info si lo añadiste)
-     * y además guarda el Envelope.gameId en this.gameId.
+     * ✅ MEJORADO: Handshake con modo de juego
      */
     fun hello(
         clientVersion: String = "1.0",
         playerName: String,
+        mode: GameModeId = GameModeId.PVP, // ✅ NUEVO
         handshakeTimeoutMs: Int = 2500
     ): Welcome {
         val reqId = newReqId("hello-$playerName")
@@ -30,7 +30,11 @@ class GameTcpClient(private val conn: TcpClientConnection) : Closeable {
                 v = 1,
                 requestId = reqId,
                 gameId = null,
-                payload = Hello(clientVersion = clientVersion, playerName = playerName)
+                payload = Hello(
+                    clientVersion = clientVersion,
+                    playerName = playerName,
+                    mode = mode // ✅ NUEVO
+                )
             )
         )
 
@@ -46,7 +50,6 @@ class GameTcpClient(private val conn: TcpClientConnection) : Closeable {
             else -> error("Expected WELCOME, got ${p::class.simpleName}")
         }
     }
-
 
     fun receiveEnvelope(): Envelope = conn.receive()
 

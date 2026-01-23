@@ -14,12 +14,16 @@ private val protocolModule = SerializersModule {
         // Errors
         subclass(ErrorMsg::class, ErrorMsg.serializer())
 
-        // Game actions / events
+        // Game actions (cliente → servidor)
         subclass(StartGame::class, StartGame.serializer())
         subclass(PlaceShip::class, PlaceShip.serializer())
         subclass(Shoot::class, Shoot.serializer())
+
+        // Game events (servidor → cliente)
         subclass(GameStateEvent::class, GameStateEvent.serializer())
         subclass(GameOverEvent::class, GameOverEvent.serializer())
+        subclass(RoomUpdateEvent::class, RoomUpdateEvent.serializer()) // ✅ CORREGIDO: estaba faltando
+        subclass(PlayerDisconnectedEvent::class, PlayerDisconnectedEvent.serializer()) // ✅ NUEVO
     }
 }
 
@@ -36,4 +40,5 @@ val ProtocolJson: Json = Json {
     // Robustez
     isLenient = true
     coerceInputValues = true
+    prettyPrint = false // ✅ NUEVO: compacto para red (cambiar a true para debugging)
 }

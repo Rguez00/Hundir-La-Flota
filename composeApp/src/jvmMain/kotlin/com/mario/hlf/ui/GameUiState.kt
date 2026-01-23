@@ -1,24 +1,28 @@
 package com.mario.hlf.ui
 
+import com.mario.hlf.protocol.GameModeId
 import com.mario.hlf.protocol.GameOverEvent
 import com.mario.hlf.protocol.GameStateDto
 import com.mario.hlf.protocol.PlayerId
 import com.mario.hlf.protocol.RoomStatusId
 
-enum class GameModeUi { PVP, PVE }
-
+/**
+ * ✅ SIMPLIFICADO: Usar GameModeId del protocolo directamente
+ */
 sealed interface GameUiState {
     data object Disconnected : GameUiState
 
     data class Connecting(
         val host: String,
         val port: Int,
-        val name: String
+        val name: String,
+        val mode: GameModeId // ✅ NUEVO
     ) : GameUiState
 
     /**
      * Conectado + handshake OK.
-     * Aún puede estar WAITING si no hay rival (PVP) o READY si ya está la sala completa.
+     * - PVP: puede estar WAITING (esperando rival) o READY (sala completa)
+     * - PVE: siempre READY (IA disponible inmediatamente)
      */
     data class Connected(
         val host: String,
@@ -28,7 +32,7 @@ sealed interface GameUiState {
         val roomId: String,
         val roomStatus: RoomStatusId,
         val me: PlayerId,
-        val mode: GameModeUi = GameModeUi.PVP
+        val mode: GameModeId
     ) : GameUiState
 
     /**
@@ -39,8 +43,16 @@ sealed interface GameUiState {
         val me: PlayerId,
         val state: GameStateDto,
         val gameOver: GameOverEvent? = null,
-        val mode: GameModeUi = GameModeUi.PVP
+        val mode: GameModeId,
+        val opponentDisconnected: Boolean = false // ✅ NUEVO: rival se desconectó
     ) : GameUiState
 
-    data class Error(val message: String) : GameUiState
+    /**
+     * ✅ MEJORADO: Error con más contexto
+     */
+    data class Error(
+        val message: String,
+        val reconnectable: Boolean = false, // ✅ NUEVO: puede reintentar conexión
+        val previousState: GameUiState? = null // ✅ NUEVO: estado previo (para volver)
+    ) : GameUiState
 }

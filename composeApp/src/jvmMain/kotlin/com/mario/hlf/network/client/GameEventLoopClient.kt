@@ -12,10 +12,6 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Loop único de lectura por conexión.
  * - Un solo reader por socket.
  * - stop(): cierra la conexión para desbloquear el readFrame().
- *
- * Regla:
- * - Si el scope viene de fuera, no lo cancelamos.
- * - Si lo creamos aquí, sí lo cancelamos.
  */
 class GameEventLoopClient private constructor(
     private val api: GameTcpClient,
@@ -28,19 +24,27 @@ class GameEventLoopClient private constructor(
     private var readerJob: Job? = null
     private val stopping = AtomicBoolean(false)
 
-    // ✅ Mejor: emitimos ServerMsg (no Msg genérico)
+    // Eventos generales
     private val _events = MutableSharedFlow<ServerMsg>(extraBufferCapacity = 64)
     val events = _events.asSharedFlow()
 
+    // Estados específicos
     private val _latestState = MutableStateFlow<GameStateDto?>(null)
     val latestState = _latestState.asStateFlow()
 
     private val _gameOver = MutableStateFlow<GameOverEvent?>(null)
     val gameOver = _gameOver.asStateFlow()
 
-    // ✅ NUEVO: estado de lobby
     private val _roomUpdate = MutableStateFlow<RoomUpdateEvent?>(null)
     val roomUpdate = _roomUpdate.asStateFlow()
+
+    // ✅ NUEVO: Desconexiones de jugadores
+    private val _playerDisconnected = MutableStateFlow<PlayerDisconnectedEvent?>(null)
+    val playerDisconnected = _playerDisconnected.asStateFlow()
+
+    // ✅ NUEVO: Errores del servidor
+    private val _errors = MutableSharedFlow<ErrorMsg>(extraBufferCapacity = 16)
+    val errors = _errors.asSharedFlow()
 
     fun start() {
         check(readerJob == null) { "Reader already started" }
@@ -67,20 +71,28 @@ class GameEventLoopClient private constructor(
                             _events.tryEmit(p)
                         }
 
-                        // ✅ si algún día envías ErrorMsg desde router
-                        is ErrorMsg -> {
+                        is PlayerDisconnectedEvent -> { // ✅ NUEVO
+                            _playerDisconnected.value = p
                             _events.tryEmit(p)
                         }
 
-                        // Si llega algo que NO es ServerMsg, lo ignoramos (o log si quieres)
+                        is ErrorMsg -> { // ✅ MEJORADO
+                            _errors.tryEmit(p)
+                            _events.tryEmit(p)
+                        }
+
+                        // Ignorar otros mensajes (Hello, Welcome, etc.)
                         else -> {
-                            // No-op
+                            // No-op o log si quieres debug
                         }
                     }
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) return@launch
                 if (stopping.get()) return@launch
+
+                // ✅ NUEVO: Propagar error como ErrorMsg interno
+                _errors.tryEmit(ErrorMsg("CONNECTION_ERROR", t.message ?: "Unknown error"))
                 throw t
             }
         }
@@ -99,5 +111,15 @@ class GameEventLoopClient private constructor(
             job.cancelAndJoin()
             if (ownsScope) scope.cancel()
         }
+    }
+
+    /**
+     * ✅ NUEVO: Reset de estados (útil para reconectar)
+     */
+    fun resetStates() {
+        _latestState.value = null
+        _gameOver.value = null
+        _roomUpdate.value = null
+        _playerDisconnected.value = null
     }
 }

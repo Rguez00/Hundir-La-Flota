@@ -10,16 +10,15 @@ import com.mario.hlf.domain.usecase.PlaceShipUseCase
 import com.mario.hlf.domain.usecase.ShootUseCase
 import com.mario.hlf.domain.usecase.StartGameUseCase
 import com.mario.hlf.domain.usecase.dto.GameState
+import com.mario.hlf.protocol.GameModeId
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Fuente de verdad del estado de partidas en el servidor.
- * - Mantiene el mapa gameId -> Game
+ * - Mantiene el mapa gameId -> GameEntry
  * - Garantiza operaciones atómicas por partida con Mutex (por gameId)
- *
- * Nota: el dominio ya gestiona reglas; aquí solo gestionamos lifecycle + concurrencia.
  */
 class GameService(
     private val startGameUseCase: StartGameUseCase = StartGameUseCase(),
@@ -27,15 +26,16 @@ class GameService(
     private val shootUseCase: ShootUseCase = ShootUseCase(),
     private val getStateUseCase: GetGameStateUseCase = GetGameStateUseCase(),
 ) {
-    private data class Entry(
+    private data class GameEntry(
         var game: Game? = null,
+        val mode: GameModeId = GameModeId.PVP, // ✅ NUEVO
         val mutex: Mutex = Mutex()
     )
 
-    private val games = ConcurrentHashMap<String, Entry>()
+    private val games = ConcurrentHashMap<String, GameEntry>()
 
-    private fun entryOf(gameId: GameId): Entry =
-        games.computeIfAbsent(gameId.value) { Entry() }
+    private fun entryOf(gameId: GameId, mode: GameModeId = GameModeId.PVP): GameEntry =
+        games.computeIfAbsent(gameId.value) { GameEntry(mode = mode) }
 
     fun exists(gameId: GameId): Boolean = games.containsKey(gameId.value)
 
@@ -43,8 +43,16 @@ class GameService(
         games.remove(gameId.value)
     }
 
-    suspend fun startGame(gameId: GameId, boardSize: Int = 10, allowAdjacency: Boolean = false): Game {
-        val entry = entryOf(gameId)
+    /**
+     * ✅ MEJORADO: Incluir modo de juego
+     */
+    suspend fun startGame(
+        gameId: GameId,
+        mode: GameModeId,
+        boardSize: Int = 10,
+        allowAdjacency: Boolean = false
+    ): Game {
+        val entry = entryOf(gameId, mode)
         return entry.mutex.withLock {
             check(entry.game == null) { "Game already started for gameId=${gameId.value}" }
             val g = startGameUseCase.invoke(boardSize = boardSize, allowAdjacency = allowAdjacency)
@@ -60,12 +68,12 @@ class GameService(
         type: ShipType,
         orientation: Orientation
     ): Game {
-        val entry = entryOf(gameId)
+        val entry = games[gameId.value] ?: error("Game not found for gameId=${gameId.value}")
         return entry.mutex.withLock {
             val g = entry.game ?: error("Game not started for gameId=${gameId.value}")
-            val updated = placeShipUseCase.invoke(g, player, start, type, orientation)
-            entry.game = updated
-            updated
+            placeShipUseCase.invoke(g, player, start, type, orientation)
+            // No reasignar: Game es mutable
+            g
         }
     }
 
@@ -74,7 +82,7 @@ class GameService(
      * OJO: no devuelve snapshots; solo ejecuta el disparo.
      */
     suspend fun shoot(gameId: GameId, target: Coordinate): ShotResult {
-        val entry = entryOf(gameId)
+        val entry = games[gameId.value] ?: error("Game not found for gameId=${gameId.value}")
         return entry.mutex.withLock {
             val g = entry.game ?: error("Game not started for gameId=${gameId.value}")
             shootUseCase.invoke(g, target)
@@ -82,7 +90,7 @@ class GameService(
     }
 
     suspend fun getGameState(gameId: GameId, viewer: Game.Player): GameState {
-        val entry = entryOf(gameId)
+        val entry = games[gameId.value] ?: error("Game not found for gameId=${gameId.value}")
         return entry.mutex.withLock {
             val g = entry.game ?: error("Game not started for gameId=${gameId.value}")
             getStateUseCase.invoke(g, viewer)
@@ -90,13 +98,31 @@ class GameService(
     }
 
     /**
-     * Útil para 5.3+ cuando queramos emitir GAME_OVER y limpiar memoria.
+     * Útil para detectar fin de partida
      */
     suspend fun isOver(gameId: GameId): Boolean {
-        val entry = entryOf(gameId)
+        val entry = games[gameId.value] ?: return false
         return entry.mutex.withLock {
             val g = entry.game ?: return@withLock false
             g.phase == Game.Phase.OVER
+        }
+    }
+
+    /**
+     * ✅ NUEVO: Obtener modo de juego
+     */
+    suspend fun getMode(gameId: GameId): GameModeId? {
+        return games[gameId.value]?.mode
+    }
+
+    /**
+     * ✅ NUEVO: Obtener número de barcos pendientes por colocar
+     */
+    suspend fun getRemainingShips(gameId: GameId, player: Game.Player): Int {
+        val entry = games[gameId.value] ?: return 0
+        return entry.mutex.withLock {
+            val g = entry.game ?: return@withLock 0
+            g.remainingCount(player)
         }
     }
 
@@ -112,7 +138,7 @@ class GameService(
      * Esto evita race conditions (estado mezclado) en el router.
      */
     suspend fun shootAndSnapshot(gameId: GameId, target: Coordinate): ShootOutcome {
-        val entry = entryOf(gameId)
+        val entry = games[gameId.value] ?: error("Game not found for gameId=${gameId.value}")
         return entry.mutex.withLock {
             val g = entry.game ?: error("Game not started for gameId=${gameId.value}")
 

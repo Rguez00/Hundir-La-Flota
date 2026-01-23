@@ -18,6 +18,7 @@ kotlin {
             implementation(libs.composeUi)
             implementation(libs.composeResources)
             implementation(libs.composeUiToolingPreview)
+            implementation("org.jetbrains.compose.material:material-icons-extended:1.6.0") // ✅ CORREGIDO
 
             implementation(libs.lifecycleViewmodelCompose)
             implementation(libs.lifecycleRuntimeCompose)

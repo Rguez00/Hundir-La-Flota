@@ -2,12 +2,14 @@ package com.mario.hlf.server
 
 import com.mario.hlf.network.Framing
 import com.mario.hlf.protocol.*
+import com.mario.hlf.server.ai.AIPlayer
 import java.io.EOFException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.Socket
 import java.net.SocketException
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 class ClientSession(
     private val socket: Socket,
@@ -16,7 +18,8 @@ class ClientSession(
     private val sessions: SessionRegistry,
     private val rooms: RoomRegistry,
     private val connections: ConnectionRegistry,
-    private val router: MessageRouter
+    private val router: MessageRouter,
+    private val aiPlayers: ConcurrentHashMap<String, AIPlayer> = ConcurrentHashMap() // ✅ NUEVO
 ) {
     suspend fun run() {
         log("session started clientId=${clientId.value}")
@@ -37,10 +40,11 @@ class ClientSession(
                     when (env.payload) {
                         is Hello -> {
                             val welcomeEnv = handleHello(env)
-
-                            // WELCOME siempre vuelve por el socket actual (respuesta directa al HELLO)
                             writeEnvelope(output, welcomeEnv)
                             log("sent Welcome reqId=${welcomeEnv.requestId} gameId=${welcomeEnv.gameId}")
+
+                            // ✅ Broadcast ROOM_UPDATE si es PVP y hay otro jugador
+                            broadcastRoomUpdateIfNeeded(welcomeEnv.gameId)
                         }
 
                         else -> {
@@ -52,12 +56,38 @@ class ClientSession(
                     }
                 }
             } finally {
-                runCatching { connections.unregister(clientId) }
-                runCatching { rooms.removeClient(clientId) }
-                runCatching { sessions.remove(clientId) }
-                log("session closed clientId=${clientId.value}")
+                handleDisconnection()
             }
         }
+    }
+
+    /**
+     * ✅ Manejar desconexión limpia
+     */
+    private suspend fun handleDisconnection() {
+        log("handling disconnection for clientId=${clientId.value}")
+
+        val session = sessions.get(clientId)
+        val gameId = session?.gameId
+
+        // Notificar a otros jugadores en la sala
+        if (gameId != null) {
+            val dispatches = router.notifyPlayerDisconnected(clientId, gameId)
+            for (d in dispatches) {
+                connections.sendTo(d.target, d.envelope)
+            }
+
+            // ✅ NUEVO: Limpiar IA si existe
+            aiPlayers.remove(gameId.value)
+            log("cleaned up AI for gameId=${gameId.value}")
+        }
+
+        // Limpiar registros
+        runCatching { connections.unregister(clientId) }
+        runCatching { rooms.removeClient(clientId) }
+        runCatching { sessions.remove(clientId) }
+
+        log("session closed clientId=${clientId.value}")
     }
 
     private fun safeReadEnvelopeOrNull(input: InputStream): Envelope? {
@@ -89,16 +119,20 @@ class ClientSession(
         runCatching { output.flush() }
     }
 
+    /**
+     * ✅ Handshake con soporte PVE y modo
+     */
     private suspend fun handleHello(env: Envelope): Envelope {
         val payload = env.payload as Hello
+        val requestedMode = payload.mode
 
         // 1) Guardar nombre en sesión
         sessions.update(clientId) {
             it.copy(playerName = payload.playerName, status = SessionStatus.CONNECTED)
         }
 
-        // 2) Join / create room
-        val join = rooms.joinOrCreate(clientId)
+        // 2) Join / create room con modo especificado
+        val join = rooms.joinOrCreate(clientId, requestedMode)
 
         // 3) Actualizar sesión con room/game/slot
         val status = if (join.roomStatus == RoomStatus.READY) SessionStatus.IN_GAME else SessionStatus.WAITING
@@ -111,11 +145,18 @@ class ClientSession(
             )
         }
 
-        // slot -> PlayerId
+        // ✅ NUEVO: Crear IA si es modo PVE
+        if (join.mode == GameModeId.PVE && join.gameId != null) {
+            val ai = aiPlayers.getOrPut(join.gameId.value) {
+                AIPlayer(config.aiDifficulty)
+            }
+            log("created AI for gameId=${join.gameId.value} with difficulty=${config.aiDifficulty}")
+        }
+
+        // 4) Preparar respuesta WELCOME
         val me = if (join.slot == 1) PlayerId.P1 else PlayerId.P2
         val roomStatusId = if (join.roomStatus == RoomStatus.READY) RoomStatusId.READY else RoomStatusId.WAITING
 
-        // 4) Respuesta WELCOME (con info de lobby)
         val welcome = Welcome(
             serverVersion = "1.0",
             config = ServerConfigDto(
@@ -123,10 +164,11 @@ class ClientSession(
                 port = config.port,
                 maxClients = config.maxClients
             ),
-            records = RecordsDto(),
+            records = RecordsDto(), // ✅ TODO: Cargar records reales
             roomId = join.roomId.value,
             slot = me,
-            roomStatus = roomStatusId
+            roomStatus = roomStatusId,
+            mode = join.mode
         )
 
         return Envelope(
@@ -137,5 +179,46 @@ class ClientSession(
         )
     }
 
-    private fun log(msg: String) = println("[SERVER] $msg")
+    /**
+     * ✅ Broadcast ROOM_UPDATE cuando se llena sala PVP
+     */
+    private suspend fun broadcastRoomUpdateIfNeeded(gameIdStr: String?) {
+        if (gameIdStr == null) return
+
+        val gameId = GameId(gameIdStr)
+        val room = rooms.getRoomByGameId(gameId) ?: return
+
+        // Solo broadcast si es PVP y ahora está READY
+        if (room.mode == GameModeId.PVP && room.status == RoomStatus.READY && room.players.size == 2) {
+            val event = RoomUpdateEvent(
+                roomId = room.roomId.value,
+                roomStatus = RoomStatusId.READY,
+                players = room.players.size,
+                mode = GameModeId.PVP
+            )
+
+            val envelope = Envelope(
+                v = 1,
+                requestId = UUID.randomUUID().toString(),
+                gameId = gameIdStr,
+                payload = event
+            )
+
+            // Enviar a ambos jugadores
+            for (playerId in room.players) {
+                connections.sendTo(playerId, envelope)
+            }
+
+            log("broadcasted ROOM_UPDATE: sala ${room.roomId.value} ahora READY")
+        }
+    }
+
+    // ✅ NUEVO: Obtener o crear IA para un juego
+    fun getOrCreateAI(gameId: GameId): AIPlayer {
+        return aiPlayers.getOrPut(gameId.value) {
+            AIPlayer(config.aiDifficulty)
+        }
+    }
+
+    private fun log(msg: String) = println("[SESSION] $msg")
 }

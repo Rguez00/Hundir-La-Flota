@@ -2,11 +2,11 @@ package com.mario.hlf
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import com.mario.hlf.protocol.GameModeId
 import com.mario.hlf.protocol.PhaseId
-import com.mario.hlf.protocol.RoomStatusId
 import com.mario.hlf.protocol.PlayerId
+import com.mario.hlf.protocol.RoomStatusId
 import com.mario.hlf.ui.GameController
-import com.mario.hlf.ui.GameModeUi
 import com.mario.hlf.ui.GameUiState
 import com.mario.hlf.ui.screens.BattleScreen
 import com.mario.hlf.ui.screens.LobbyScreen
@@ -24,13 +24,11 @@ fun App(onExit: () -> Unit) {
 
     MaterialTheme {
         when (val s = uiState) {
-
             is GameUiState.Disconnected -> {
                 MainMenuScreen(
                     defaultHost = "127.0.0.1",
                     defaultPort = 5678,
                     defaultName = "Mario",
-                    // ✅ ahora pasamos mode (si tu MainMenuScreen aún no lo soporta, déjalo fijo en PVP)
                     onConnect = { host, port, name, mode ->
                         controller.connect(host, port, name, mode)
                     },
@@ -40,31 +38,45 @@ fun App(onExit: () -> Unit) {
 
             is GameUiState.Connecting -> {
                 LobbyScreen(
-                    title = "Conectando…",
-                    subtitle = "Conectando a ${s.host}:${s.port}",
+                    title = "Conectando",
+                    subtitle = "Conectando a ${s.host}:${s.port}...",
+                    mode = s.mode,
                     showStart = false,
-                    onStart = null,
+                    onStart = {},
                     onDisconnect = { controller.disconnect() }
                 )
             }
 
             is GameUiState.Connected -> {
                 val isReady = (s.roomStatus == RoomStatusId.READY)
-                val canStart = isReady && (s.me == PlayerId.P1) && (s.mode == GameModeUi.PVP)
+
+                val canStart = when (s.mode) {
+                    GameModeId.PVP -> isReady && s.me == PlayerId.P1
+                    GameModeId.PVE -> isReady
+                }
 
                 val subtitle = when {
-                    s.mode == GameModeUi.PVE -> "Modo PVE (contra IA)"
-                    isReady -> "Sala lista. Puedes iniciar la partida."
-                    else -> "Esperando a otro jugador…"
+                    s.mode == GameModeId.PVE && isReady ->
+                        "IA lista. Puedes iniciar la partida."
+                    s.mode == GameModeId.PVP && isReady && s.me == PlayerId.P1 ->
+                        "Sala completa. Eres el anfitrión, puedes iniciar."
+                    s.mode == GameModeId.PVP && isReady && s.me == PlayerId.P2 ->
+                        "Sala completa. Esperando a que el anfitrión inicie..."
+                    s.mode == GameModeId.PVP && !isReady ->
+                        "Buscando rival..."
+                    else ->
+                        "Esperando..."
                 }
 
                 LobbyScreen(
                     title = "Lobby",
                     subtitle = subtitle,
                     gameId = s.gameId,
-                    // ✅ START solo si READY y eres P1 (en PVP)
+                    mode = s.mode,
+                    me = s.me,
+                    roomStatus = s.roomStatus,
                     showStart = canStart,
-                    onStart = if (canStart) ({ controller.startGame() }) else null,
+                    onStart = { controller.startGame() }, // ✅ CORREGIDO: Siempre lambda
                     onDisconnect = { controller.disconnect() }
                 )
             }
@@ -76,9 +88,9 @@ fun App(onExit: () -> Unit) {
                     PhaseId.PLACEMENT -> {
                         PlacementScreen(
                             state = st,
+                            me = s.me,
+                            mode = s.mode,
                             onDisconnect = { controller.disconnect() },
-                            onStartGame = { controller.startGame() },
-                            // ✅ ya NO pasamos player (lo calcula el controller)
                             onPlaceShip = { row, col, ship, orientation ->
                                 controller.placeShip(row, col, ship, orientation)
                             }
@@ -88,9 +100,12 @@ fun App(onExit: () -> Unit) {
                     PhaseId.BATTLE -> {
                         BattleScreen(
                             state = st,
+                            me = s.me,
+                            mode = s.mode,
                             gameOver = s.gameOver,
+                            opponentDisconnected = s.opponentDisconnected,
                             onDisconnect = { controller.disconnect() },
-                            // ✅ ya NO pasamos player
+                            onBackToLobby = { controller.backToLobby() },
                             onShoot = { row, col ->
                                 controller.shoot(row, col)
                             }
@@ -98,11 +113,15 @@ fun App(onExit: () -> Unit) {
                     }
 
                     PhaseId.OVER -> {
+                        val won = s.gameOver?.winner == s.me
+
                         LobbyScreen(
                             title = "Game Over",
-                            subtitle = "Ganador: ${s.gameOver?.winner ?: "?"}",
+                            subtitle = if (won) "🎉 ¡Has ganado!" else "💔 Has perdido",
+                            gameId = s.gameId,
+                            mode = s.mode,
                             showStart = false,
-                            onStart = null,
+                            onStart = {},
                             onDisconnect = { controller.disconnect() }
                         )
                     }
@@ -114,7 +133,7 @@ fun App(onExit: () -> Unit) {
                     title = "Error",
                     subtitle = s.message,
                     showStart = false,
-                    onStart = null,
+                    onStart = {},
                     onDisconnect = { controller.disconnect() }
                 )
             }
