@@ -38,10 +38,28 @@ class RoomRegistry {
     suspend fun joinOrCreate(clientId: ClientId): JoinResult = mutex.withLock {
         // Si el cliente ya estaba en una sala (reconnect raro), lo limpiamos primero
         roomIdByClientId[clientId.value]?.let { existingRoomId ->
-            rooms[existingRoomId]?.players?.remove(clientId)
+            val r = rooms[existingRoomId]
+            if (r != null) {
+                r.players.remove(clientId)
+                r.status = if (r.players.size >= 2) RoomStatus.READY else RoomStatus.WAITING
+
+                // si se quedó vacía, bórrala
+                if (r.players.isEmpty()) {
+                    rooms.remove(r.roomId.value)
+                    roomIdByGameId.remove(r.gameId.value)
+                    if (waitingRoomId == r.roomId) waitingRoomId = null
+                } else {
+                    // si queda alguien solo, puede pasar a ser waiting
+                    if (r.status == RoomStatus.WAITING) {
+                        val w = waitingRoomId
+                        if (w == null || rooms[w.value] == null) waitingRoomId = r.roomId
+                    }
+                }
+            }
             roomIdByClientId.remove(clientId.value)
         }
 
+        // --- tu lógica actual tal cual ---
         val waiting = waitingRoomId?.let { rooms[it.value] }
         val room = if (waiting == null || waiting.status != RoomStatus.WAITING || waiting.players.size >= 2) {
             val newRoom = Room(roomId = newRoomId(), gameId = newGameId())
@@ -59,20 +77,15 @@ class RoomRegistry {
         }
 
         val slot = room.players.indexOf(clientId) + 1
-
         room.status = if (room.players.size >= 2) RoomStatus.READY else RoomStatus.WAITING
 
         if (room.status == RoomStatus.READY && waitingRoomId == room.roomId) {
             waitingRoomId = null
         }
 
-        JoinResult(
-            roomId = room.roomId,
-            gameId = room.gameId,
-            slot = slot,
-            roomStatus = room.status
-        )
+        JoinResult(room.roomId, room.gameId, slot, room.status)
     }
+
 
     suspend fun removeClient(clientId: ClientId) = mutex.withLock {
         val rid = roomIdByClientId.remove(clientId.value) ?: return@withLock

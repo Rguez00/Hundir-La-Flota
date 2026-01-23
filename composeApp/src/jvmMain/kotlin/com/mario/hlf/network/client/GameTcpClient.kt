@@ -14,11 +14,15 @@ class GameTcpClient(private val conn: TcpClientConnection) : Closeable {
     private fun newReqId(prefix: String): String = "$prefix-${UUID.randomUUID()}"
     private fun requireGameId(): String = requireNotNull(gameId) { "No gameId. Call hello() first." }
 
+    /**
+     * ✅ Handshake: devuelve Welcome (config/records + lobby info si lo añadiste)
+     * y además guarda el Envelope.gameId en this.gameId.
+     */
     fun hello(
         clientVersion: String = "1.0",
         playerName: String,
         handshakeTimeoutMs: Int = 2500
-    ): String {
+    ): Welcome {
         val reqId = newReqId("hello-$playerName")
 
         conn.send(
@@ -36,16 +40,16 @@ class GameTcpClient(private val conn: TcpClientConnection) : Closeable {
             is Welcome -> {
                 val gid = requireNotNull(resp.gameId) { "WELCOME received but Envelope.gameId is null" }
                 gameId = gid
-                gid
+                p
             }
             is ErrorMsg -> error("HELLO failed: ${p.code} - ${p.message}")
             else -> error("Expected WELCOME, got ${p::class.simpleName}")
         }
     }
 
+
     fun receiveEnvelope(): Envelope = conn.receive()
 
-    // Send-only (para usar con EventLoop)
     fun sendStartGame(boardSize: Int = 10, allowAdjacency: Boolean = false) {
         val gid = requireGameId()
         conn.send(

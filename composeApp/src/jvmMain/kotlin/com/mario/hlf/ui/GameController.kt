@@ -8,7 +8,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
-import kotlin.coroutines.CoroutineContext
 
 class GameController(
     private val scope: CoroutineScope
@@ -18,18 +17,25 @@ class GameController(
     private var loop: GameEventLoopClient? = null
 
     private var currentGameId: String? = null
+    private var myPlayerId: PlayerId? = null
+    private var currentRoomId: String? = null
+    private var currentRoomStatus: RoomStatusId? = null
+    private var currentMode: GameModeUi = GameModeUi.PVP
 
     private var bindLatestJob: Job? = null
     private var bindGameOverJob: Job? = null
+    private var bindEventsJob: Job? = null
 
     private val _uiState = MutableStateFlow<GameUiState>(GameUiState.Disconnected)
     val uiState: StateFlow<GameUiState> = _uiState
 
-    // ✅ Scope REAL para red/IO (evita bloquear UI)
+    // IO scope para red (no bloquea UI)
     private val ioScope = CoroutineScope(scope.coroutineContext + Dispatchers.IO)
 
-    fun connect(host: String, port: Int, name: String) {
-        // UI -> Connecting siempre en Main
+    fun connect(host: String, port: Int, name: String, mode: GameModeUi = GameModeUi.PVP) {
+        // ✅ Guardar modo ANTES de safeCloseAll() (porque safeCloseAll resetea todo)
+        currentMode = mode
+
         scope.launch(Dispatchers.Main) {
             _uiState.value = GameUiState.Connecting(host, port, name)
         }
@@ -44,25 +50,42 @@ class GameController(
                 val a = GameTcpClient(c)
                 api = a
 
-                // ✅ Handshake antes del loop (solo hay 1 lector aquí)
-                val gid = a.hello(playerName = name)
+                // ✅ Handshake ANTES del event loop
+                val welcome = a.hello(playerName = name)
+
+                val gid = requireNotNull(a.gameId) { "Server did not provide gameId in Envelope" }
                 currentGameId = gid
+
+                // ✅ Soportar compatibilidad: si vienen vacíos, no crashear
+                val me = welcome.slot
+                val roomId = welcome.roomId.ifBlank { "LOCAL" }
+                val roomStatus = welcome.roomStatus
+
+                myPlayerId = me
+                currentRoomId = roomId
+                currentRoomStatus = roomStatus
 
                 // ✅ lectura infinita para el loop
                 c.setReadTimeout(0)
 
-                // ✅ Loop leyendo SIEMPRE en IO
                 val l = GameEventLoopClient(a, ioScope)
                 loop = l
                 l.start()
 
-                // ✅ Collectors pueden vivir en scope (Main) sin bloquear,
-                // porque solo consumen StateFlows, no hacen I/O
                 bindStateFlows(l)
+                bindEvents(l) // opcional, pero útil para actualizar lobby
 
-                // ✅ Cambiar pantalla SIEMPRE en Main
                 withContext(Dispatchers.Main) {
-                    _uiState.value = GameUiState.Connected(host, port, name, gid)
+                    _uiState.value = GameUiState.Connected(
+                        host = host,
+                        port = port,
+                        name = name,
+                        gameId = gid,
+                        roomId = roomId,
+                        roomStatus = roomStatus,
+                        me = me,
+                        mode = currentMode
+                    )
                 }
             } catch (t: Throwable) {
                 safeCloseAll()
@@ -73,16 +96,25 @@ class GameController(
         }
     }
 
+    /**
+     * PVP: el servidor decide.
+     * PVE: de momento lo bloqueamos hasta implementar IA local (luego cambiaremos esto).
+     */
     fun startGame() {
+        if (currentMode == GameModeUi.PVE) return
         api?.sendStartGame(boardSize = 10, allowAdjacency = false)
     }
 
-    fun placeShip(player: PlayerId, row: Int, col: Int, ship: ShipTypeId, orientation: OrientationId) {
-        api?.sendPlaceShip(player, row, col, ship, orientation)
+    fun placeShip(row: Int, col: Int, ship: ShipTypeId, orientation: OrientationId) {
+        if (currentMode == GameModeUi.PVE) return
+        val me = myPlayerId ?: PlayerId.P1
+        api?.sendPlaceShip(me, row, col, ship, orientation)
     }
 
-    fun shoot(player: PlayerId, row: Int, col: Int) {
-        api?.sendShoot(player, row, col)
+    fun shoot(row: Int, col: Int) {
+        if (currentMode == GameModeUi.PVE) return
+        val me = myPlayerId ?: PlayerId.P1
+        api?.sendShoot(me, row, col)
     }
 
     private fun bindStateFlows(l: GameEventLoopClient) {
@@ -98,8 +130,26 @@ class GameController(
                             is GameUiState.InGame -> prev.gameId
                             else -> currentGameId ?: "UNKNOWN"
                         }
+                        val me = when (prev) {
+                            is GameUiState.Connected -> prev.me
+                            is GameUiState.InGame -> prev.me
+                            else -> myPlayerId ?: PlayerId.P1
+                        }
+                        val mode = when (prev) {
+                            is GameUiState.Connected -> prev.mode
+                            is GameUiState.InGame -> prev.mode
+                            else -> currentMode
+                        }
+
                         val prevGameOver = (prev as? GameUiState.InGame)?.gameOver
-                        GameUiState.InGame(gameId = gid, state = st, gameOver = prevGameOver)
+
+                        GameUiState.InGame(
+                            gameId = gid,
+                            me = me,
+                            state = st,
+                            gameOver = prevGameOver,
+                            mode = mode
+                        )
                     }
                 }
             }
@@ -117,6 +167,31 @@ class GameController(
         }
     }
 
+    /**
+     * ✅ Opcional: si en el futuro emites RoomUpdateEvent desde el server,
+     * aquí puedes actualizar el Lobby en caliente.
+     *
+     * Si NO existe RoomUpdateEvent aún, déjalo tal cual: no rompe nada.
+     */
+    private fun bindEvents(l: GameEventLoopClient) {
+        bindEventsJob?.cancel()
+
+        bindEventsJob = scope.launch {
+            l.events.collect { msg ->
+                val upd = msg as? RoomUpdateEvent ?: return@collect
+
+                currentRoomId = upd.roomId
+                currentRoomStatus = upd.roomStatus
+
+                _uiState.update { prev ->
+                    if (prev is GameUiState.Connected) {
+                        prev.copy(roomId = upd.roomId, roomStatus = upd.roomStatus)
+                    } else prev
+                }
+            }
+        }
+    }
+
     fun disconnect() {
         ioScope.launch {
             safeCloseAll()
@@ -129,10 +204,16 @@ class GameController(
     private suspend fun safeCloseAll() {
         bindLatestJob?.cancel()
         bindGameOverJob?.cancel()
+        bindEventsJob?.cancel()
         bindLatestJob = null
         bindGameOverJob = null
+        bindEventsJob = null
 
         currentGameId = null
+        myPlayerId = null
+        currentRoomId = null
+        currentRoomStatus = null
+        // ⚠️ NO reseteamos currentMode aquí: lo decide connect()
 
         val l = loop
         loop = null

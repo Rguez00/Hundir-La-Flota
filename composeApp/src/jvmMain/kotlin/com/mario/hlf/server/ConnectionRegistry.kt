@@ -5,38 +5,36 @@ import com.mario.hlf.protocol.Envelope
 import com.mario.hlf.protocol.ProtocolJson
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.io.Closeable
 import java.io.IOException
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
 
 class ConnectionRegistry {
 
-    private class Connection(private val out: OutputStream) : Closeable {
+    private class Connection(private val out: OutputStream) {
         private val writeMutex = Mutex()
 
         suspend fun send(env: Envelope) {
             val json = ProtocolJson.encodeToString(Envelope.serializer(), env)
             val bytes = json.toByteArray(Charsets.UTF_8)
+
             writeMutex.withLock {
+                // Framing.writeFrame ya hace flush()
                 Framing.writeFrame(out, bytes)
             }
-        }
-
-        override fun close() {
-            try { out.close() } catch (_: Throwable) {}
         }
     }
 
     private val conns = ConcurrentHashMap<String, Connection>()
 
     fun register(clientId: ClientId, out: OutputStream) {
-        // si ya había una conexión, la cerramos para no filtrar recursos
-        conns.put(clientId.value, Connection(out))?.close()
+        // 🔥 NO cerramos OutputStream aquí: lo cierra ClientSession/socket.use
+        conns[clientId.value] = Connection(out)
     }
 
     fun unregister(clientId: ClientId) {
-        conns.remove(clientId.value)?.close()
+        // 🔥 Solo quitamos del mapa (no cerramos out)
+        conns.remove(clientId.value)
     }
 
     suspend fun sendTo(clientId: ClientId, env: Envelope): Boolean {
@@ -68,12 +66,8 @@ class ConnectionRegistry {
         }
     }
 
-    /**
-     * Útil para stop() del server si quieres limpiar todo de golpe.
-     */
     fun closeAll() {
-        conns.keys.toList().forEach { key ->
-            conns.remove(key)?.close()
-        }
+        // 🔥 Igual: no cerramos streams aquí. Solo limpiamos el registro.
+        conns.clear()
     }
 }

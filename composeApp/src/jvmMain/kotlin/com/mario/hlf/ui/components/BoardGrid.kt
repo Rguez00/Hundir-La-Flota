@@ -17,18 +17,19 @@ import com.mario.hlf.protocol.CellViewId
 fun BoardGrid(
     title: String,
     board: BoardStateDto,
+    showShips: Boolean,
     onCellClick: ((row: Int, col: Int) -> Unit)? = null
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium)
 
-        Column(
-            modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outline)
-        ) {
+        Column(modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outline)) {
             for (r in 0 until board.size) {
                 Row {
                     for (c in 0 until board.size) {
-                        val cell = board.cells[r][c]
+                        val raw = board.cells[r][c]
+                        val cell = if (!showShips && raw == CellViewId.SHIP) CellViewId.EMPTY else raw
+
                         Cell(
                             cell = cell,
                             onClick = onCellClick?.let { { it(r, c) } }

@@ -9,32 +9,27 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Cliente con loop de lectura continuo.
- * - Un solo reader loop por conexión.
- * - Para parar correctamente, CERRAMOS la conexión (desbloquea readFrame()).
+ * Loop único de lectura por conexión.
+ * - Un solo reader por socket.
+ * - stop(): cierra la conexión para desbloquear el readFrame().
  *
- * Regla final:
- * - Si el scope lo pasas desde fuera (tests/UI), NO lo cancelamos aquí.
- * - Si no te pasan scope, usamos uno propio y sí lo cancelamos.
+ * Regla:
+ * - Si el scope viene de fuera, no lo cancelamos.
+ * - Si lo creamos aquí, sí lo cancelamos.
  */
 class GameEventLoopClient private constructor(
     private val api: GameTcpClient,
     private val scope: CoroutineScope,
     private val ownsScope: Boolean
 ) {
-    constructor(
-        api: GameTcpClient,
-        scope: CoroutineScope
-    ) : this(api, scope, ownsScope = false)
-
-    constructor(
-        api: GameTcpClient
-    ) : this(api, CoroutineScope(SupervisorJob() + Dispatchers.IO), ownsScope = true)
+    constructor(api: GameTcpClient, scope: CoroutineScope) : this(api, scope, ownsScope = false)
+    constructor(api: GameTcpClient) : this(api, CoroutineScope(SupervisorJob() + Dispatchers.IO), ownsScope = true)
 
     private var readerJob: Job? = null
     private val stopping = AtomicBoolean(false)
 
-    private val _events = MutableSharedFlow<Msg>(extraBufferCapacity = 64)
+    // ✅ Mejor: emitimos ServerMsg (no Msg genérico)
+    private val _events = MutableSharedFlow<ServerMsg>(extraBufferCapacity = 64)
     val events = _events.asSharedFlow()
 
     private val _latestState = MutableStateFlow<GameStateDto?>(null)
@@ -42,6 +37,10 @@ class GameEventLoopClient private constructor(
 
     private val _gameOver = MutableStateFlow<GameOverEvent?>(null)
     val gameOver = _gameOver.asStateFlow()
+
+    // ✅ NUEVO: estado de lobby
+    private val _roomUpdate = MutableStateFlow<RoomUpdateEvent?>(null)
+    val roomUpdate = _roomUpdate.asStateFlow()
 
     fun start() {
         check(readerJob == null) { "Reader already started" }
@@ -51,25 +50,37 @@ class GameEventLoopClient private constructor(
             try {
                 while (isActive) {
                     val env = api.receiveEnvelope() // bloqueante
+
                     when (val p = env.payload) {
                         is GameStateEvent -> {
                             _latestState.value = p.state
                             _events.tryEmit(p)
                         }
+
                         is GameOverEvent -> {
                             _gameOver.value = p
                             _events.tryEmit(p)
                         }
-                        else -> _events.tryEmit(p)
+
+                        is RoomUpdateEvent -> {
+                            _roomUpdate.value = p
+                            _events.tryEmit(p)
+                        }
+
+                        // ✅ si algún día envías ErrorMsg desde router
+                        is ErrorMsg -> {
+                            _events.tryEmit(p)
+                        }
+
+                        // Si llega algo que NO es ServerMsg, lo ignoramos (o log si quieres)
+                        else -> {
+                            // No-op
+                        }
                     }
                 }
             } catch (t: Throwable) {
-                // Cancel normal
                 if (t is CancellationException) return@launch
-
-                // Si estamos parando, ignoramos errores por socket cerrado
                 if (stopping.get()) return@launch
-
                 throw t
             }
         }
@@ -82,15 +93,11 @@ class GameEventLoopClient private constructor(
         stopping.set(true)
 
         try {
-            // Desbloquea readFrame() cerrando la conexión
+            // desbloquea readFrame()
             api.close()
         } finally {
-            // Espera real a que muera el loop
             job.cancelAndJoin()
-
-            // Solo cancelamos si el scope es nuestro
             if (ownsScope) scope.cancel()
         }
     }
-
 }

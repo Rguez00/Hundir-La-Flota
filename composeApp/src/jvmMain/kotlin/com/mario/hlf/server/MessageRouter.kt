@@ -17,23 +17,34 @@ class MessageRouter(
     suspend fun handle(clientId: ClientId, env: Envelope): List<Dispatch> {
         return try {
             val session = sessions.get(clientId)
-                ?: return listOf(toSelf(clientId, env, errorFor(env, "NO_SESSION", "Sesión no encontrada")))
+                ?: return listOf(
+                    toSelf(clientId, env, errorFor(req = env, gameId = env.gameId, code = "NO_SESSION", msg = "Sesión no encontrada"))
+                )
 
             val gid = resolveGameId(session, env)
-                ?: return listOf(toSelf(clientId, env, errorFor(env, "NO_GAME", "No hay gameId asociado")))
+                ?: return listOf(
+                    toSelf(clientId, env, errorFor(req = env, gameId = env.gameId, code = "NO_GAME", msg = "No hay gameId asociado"))
+                )
 
             val gameId = GameId(gid)
 
             val room = rooms.getRoomByGameId(gameId)
-                ?: return listOf(toSelf(clientId, env, errorFor(env, "NO_ROOM", "No existe room para gameId=$gid")))
+                ?: return listOf(
+                    toSelf(clientId, env, errorFor(req = env, gameId = gid, code = "NO_ROOM", msg = "No existe room para gameId=$gid"))
+                )
 
             val selfPlayer = session.slot?.let { slotToPlayer(it) }
-                ?: return listOf(toSelf(clientId, env, errorFor(env, "NO_SLOT", "Sesión sin slot asignado")))
+                ?: return listOf(
+                    toSelf(clientId, env, errorFor(req = env, gameId = gid, code = "NO_SLOT", msg = "Sesión sin slot asignado"))
+                )
 
             when (val p = env.payload) {
+
                 is StartGame -> {
                     if (selfPlayer != Game.Player.P1) {
-                        return listOf(toSelf(clientId, env, errorFor(env, "FORBIDDEN", "Solo P1 puede iniciar la partida")))
+                        return listOf(
+                            toSelf(clientId, env, errorFor(req = env, gameId = gid, code = "FORBIDDEN", msg = "Solo P1 puede iniciar la partida"))
+                        )
                     }
                     games.startGame(gameId, boardSize = p.boardSize, allowAdjacency = p.allowAdjacency)
                     broadcastState(room, env, gameId)
@@ -41,7 +52,9 @@ class MessageRouter(
 
                 is PlaceShip -> {
                     if (p.player.toDomain() != selfPlayer) {
-                        return listOf(toSelf(clientId, env, errorFor(env, "FORBIDDEN", "Player no coincide con sesión")))
+                        return listOf(
+                            toSelf(clientId, env, errorFor(req = env, gameId = gid, code = "FORBIDDEN", msg = "Player no coincide con sesión"))
+                        )
                     }
                     games.placeShip(
                         gameId = gameId,
@@ -56,57 +69,68 @@ class MessageRouter(
                 is Shoot -> {
                     // 1) Anticheat: el player del mensaje debe ser el de la sesión
                     if (p.player.toDomain() != selfPlayer) {
-                        return listOf(toSelf(clientId, env, errorFor(env, "FORBIDDEN", "Player no coincide con sesión")))
+                        return listOf(
+                            toSelf(clientId, env, errorFor(req = env, gameId = gid, code = "FORBIDDEN", msg = "Player no coincide con sesión"))
+                        )
                     }
 
                     // 2) Enforce fase + turno usando el estado de dominio (viewer=selfPlayer)
-                    // (validación previa; el disparo real + snapshot será atómico)
                     val preState = games.getGameState(gameId, selfPlayer)
 
                     if (preState.phase != Game.Phase.BATTLE) {
                         return listOf(
-                            toSelf(clientId, env, errorFor(env, "INVALID_PHASE", "No se puede disparar en fase ${preState.phase}"))
+                            toSelf(
+                                clientId,
+                                env,
+                                errorFor(req = env, gameId = gid, code = "INVALID_PHASE", msg = "No se puede disparar en fase ${preState.phase}")
+                            )
                         )
                     }
 
                     if (preState.currentTurn != selfPlayer) {
                         return listOf(
-                            toSelf(clientId, env, errorFor(env, "FORBIDDEN", "No es tu turno"))
+                            toSelf(clientId, env, errorFor(req = env, gameId = gid, code = "FORBIDDEN", msg = "No es tu turno"))
                         )
                     }
 
                     // 3) Disparo + snapshots consistentes bajo el mismo lock
                     val outcome = games.shootAndSnapshot(gameId, p.toDomainCoordinate())
 
-                    // 4) Broadcast del estado a ambos usando snapshots (sin volver a consultar games)
+                    // 4) Broadcast del estado a ambos usando snapshots
                     val out = mutableListOf<Dispatch>()
-                    out.addAll(
-                        broadcastStateFromSnapshots(
-                            room = room,
-                            req = env,
-                            gameId = gameId,
-                            p1State = outcome.p1State,
-                            p2State = outcome.p2State
-                        )
+                    out += broadcastStateFromSnapshots(
+                        room = room,
+                        req = env,
+                        gameId = gameId,
+                        p1State = outcome.p1State,
+                        p2State = outcome.p2State
                     )
 
                     // 5) Si terminó, GAME_OVER
                     if (outcome.isOver && outcome.winner != null) {
-                        out.addAll(broadcastGameOver(room, env, gameId, outcome.winner))
+                        out += broadcastGameOver(room, env, gameId, outcome.winner)
                     }
 
                     out
                 }
 
                 // Handshake se maneja en ClientSession
-                is Hello, is Welcome, is ErrorMsg ->
-                    listOf(toSelf(clientId, env, errorFor(env, "UNSUPPORTED", "Handshake fuera del router en 5.3.2")))
+                is Hello, is Welcome, is ErrorMsg -> {
+                    listOf(
+                        toSelf(clientId, env, errorFor(req = env, gameId = gid, code = "UNSUPPORTED", msg = "Handshake fuera del router"))
+                    )
+                }
 
-                else ->
-                    listOf(toSelf(clientId, env, errorFor(env, "UNSUPPORTED", "Mensaje no soportado en 5.3.2")))
+                else -> {
+                    listOf(
+                        toSelf(clientId, env, errorFor(req = env, gameId = gid, code = "UNSUPPORTED", msg = "Mensaje no soportado"))
+                    )
+                }
             }
         } catch (t: Throwable) {
-            listOf(toSelf(clientId, env, errorFor(env, "EXCEPTION", t.message ?: "Error interno")))
+            listOf(
+                toSelf(clientId, env, errorFor(req = env, gameId = env.gameId, code = "EXCEPTION", msg = (t.message ?: "Error interno")))
+            )
         }
     }
 
@@ -119,11 +143,14 @@ class MessageRouter(
         else -> error("Invalid slot=$slot")
     }
 
-    private fun errorFor(req: Envelope, code: String, msg: String): Envelope =
+    /**
+     * Error estándar. Pasamos explícitamente gameId para evitar líos cuando env.gameId venga null.
+     */
+    private fun errorFor(req: Envelope, gameId: String?, code: String, msg: String): Envelope =
         Envelope(
             v = req.v,
             requestId = req.requestId ?: UUID.randomUUID().toString(),
-            gameId = req.gameId,
+            gameId = gameId ?: req.gameId,
             payload = ErrorMsg(code = code, message = msg)
         )
 

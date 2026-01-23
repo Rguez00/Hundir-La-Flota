@@ -26,8 +26,17 @@ data class Hello(
 data class Welcome(
     val serverVersion: String,
     val config: ServerConfigDto,
-    val records: RecordsDto
+    val records: RecordsDto,
+
+    // NUEVO (compatibles hacia atrás)
+    val roomId: String = "",
+    val slot: PlayerId = PlayerId.P1,
+    val roomStatus: RoomStatusId = RoomStatusId.WAITING
 ) : ServerMsg
+
+@Serializable
+enum class RoomStatusId { WAITING, READY }
+
 
 // --- Errores ---
 
@@ -35,15 +44,17 @@ data class Welcome(
 @SerialName("ERROR")
 data class ErrorMsg(
     val code: String,
-    val message: String // texto en español
+    val message: String
 ) : ServerMsg
+
+// --- Commands (cliente -> servidor) ---
 
 @Serializable
 @SerialName("START_GAME")
 data class StartGame(
     val boardSize: Int = 10,
     val allowAdjacency: Boolean = false
-) : Msg
+) : ClientMsg
 
 @Serializable
 @SerialName("PLACE_SHIP")
@@ -54,7 +65,7 @@ data class PlaceShip(
     val col: Int,
     val ship: ShipTypeId,
     val orientation: OrientationId
-) : Msg
+) : ClientMsg
 
 @Serializable
 @SerialName("SHOOT")
@@ -63,18 +74,28 @@ data class Shoot(
     val player: PlayerId,
     val row: Int,
     val col: Int
-) : Msg
+) : ClientMsg
+
+// --- Events (servidor -> cliente) ---
 
 @Serializable
 @SerialName("GAME_STATE")
 data class GameStateEvent(
     val gameId: String,
     val state: GameStateDto
-) : Msg
+) : ServerMsg
 
 @Serializable
 @SerialName("GAME_OVER")
 data class GameOverEvent(
     val gameId: String,
     val winner: PlayerId
-) : Msg
+) : ServerMsg
+
+@Serializable
+@SerialName("ROOM_UPDATE")
+data class RoomUpdateEvent(
+    val roomId: String,
+    val roomStatus: RoomStatusId,
+    val players: Int
+) : ServerMsg

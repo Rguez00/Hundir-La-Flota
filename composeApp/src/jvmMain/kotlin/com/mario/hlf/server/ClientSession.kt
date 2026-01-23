@@ -25,7 +25,7 @@ class ClientSession(
             val input = s.getInputStream()
             val output = s.getOutputStream()
 
-            // ✅ registrar SIEMPRE desde el principio
+            // Registrar SIEMPRE desde el principio
             connections.register(clientId, output)
 
             try {
@@ -36,9 +36,11 @@ class ClientSession(
 
                     when (env.payload) {
                         is Hello -> {
-                            val responseEnv = handleHello(env)
-                            writeEnvelope(output, responseEnv)
-                            log("sent Welcome reqId=${responseEnv.requestId} gameId=${responseEnv.gameId}")
+                            val welcomeEnv = handleHello(env)
+
+                            // WELCOME siempre vuelve por el socket actual (respuesta directa al HELLO)
+                            writeEnvelope(output, welcomeEnv)
+                            log("sent Welcome reqId=${welcomeEnv.requestId} gameId=${welcomeEnv.gameId}")
                         }
 
                         else -> {
@@ -109,7 +111,11 @@ class ClientSession(
             )
         }
 
-        // 4) Respuesta
+        // slot -> PlayerId
+        val me = if (join.slot == 1) PlayerId.P1 else PlayerId.P2
+        val roomStatusId = if (join.roomStatus == RoomStatus.READY) RoomStatusId.READY else RoomStatusId.WAITING
+
+        // 4) Respuesta WELCOME (con info de lobby)
         val welcome = Welcome(
             serverVersion = "1.0",
             config = ServerConfigDto(
@@ -117,7 +123,10 @@ class ClientSession(
                 port = config.port,
                 maxClients = config.maxClients
             ),
-            records = RecordsDto()
+            records = RecordsDto(),
+            roomId = join.roomId.value,
+            slot = me,
+            roomStatus = roomStatusId
         )
 
         return Envelope(
