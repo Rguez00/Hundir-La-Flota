@@ -53,15 +53,34 @@ class MessageRouter(
                 }
 
                 is Shoot -> {
+                    // 1) Anticheat: el player del mensaje debe ser el de la sesión
                     if (p.player.toDomain() != selfPlayer) {
                         return listOf(toSelf(clientId, env, errorFor(env, "FORBIDDEN", "Player no coincide con sesión")))
                     }
 
+                    // 2) Enforce fase + turno usando el estado de dominio (viewer=selfPlayer)
+                    val state = games.getGameState(gameId, selfPlayer)
+
+                    if (state.phase != Game.Phase.BATTLE) {
+                        return listOf(
+                            toSelf(clientId, env, errorFor(env, "INVALID_PHASE", "No se puede disparar en fase ${state.phase}"))
+                        )
+                    }
+
+                    if (state.currentTurn != selfPlayer) {
+                        return listOf(
+                            toSelf(clientId, env, errorFor(env, "FORBIDDEN", "No es tu turno"))
+                        )
+                    }
+
+                    // 3) Ejecutar disparo real
                     games.shoot(gameId, p.toDomainCoordinate())
 
+                    // 4) Broadcast del estado a ambos
                     val out = mutableListOf<Dispatch>()
                     out.addAll(broadcastState(room, env, gameId))
 
+                    // 5) Si terminó, GAME_OVER
                     if (games.isOver(gameId)) {
                         val stateP1 = games.getGameState(gameId, Game.Player.P1)
                         val winner = stateP1.winner
@@ -72,6 +91,7 @@ class MessageRouter(
 
                     out
                 }
+
 
                 // Handshake se maneja en ClientSession
                 is Hello, is Welcome, is ErrorMsg ->
