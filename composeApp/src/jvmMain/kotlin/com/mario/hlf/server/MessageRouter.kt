@@ -1,6 +1,7 @@
 package com.mario.hlf.server
 
 import com.mario.hlf.domain.rules.Game
+import com.mario.hlf.domain.usecase.dto.GameState
 import com.mario.hlf.protocol.*
 import com.mario.hlf.protocol.toDomain
 import com.mario.hlf.protocol.toDomainCoordinate
@@ -59,39 +60,43 @@ class MessageRouter(
                     }
 
                     // 2) Enforce fase + turno usando el estado de dominio (viewer=selfPlayer)
-                    val state = games.getGameState(gameId, selfPlayer)
+                    // (validación previa; el disparo real + snapshot será atómico)
+                    val preState = games.getGameState(gameId, selfPlayer)
 
-                    if (state.phase != Game.Phase.BATTLE) {
+                    if (preState.phase != Game.Phase.BATTLE) {
                         return listOf(
-                            toSelf(clientId, env, errorFor(env, "INVALID_PHASE", "No se puede disparar en fase ${state.phase}"))
+                            toSelf(clientId, env, errorFor(env, "INVALID_PHASE", "No se puede disparar en fase ${preState.phase}"))
                         )
                     }
 
-                    if (state.currentTurn != selfPlayer) {
+                    if (preState.currentTurn != selfPlayer) {
                         return listOf(
                             toSelf(clientId, env, errorFor(env, "FORBIDDEN", "No es tu turno"))
                         )
                     }
 
-                    // 3) Ejecutar disparo real
-                    games.shoot(gameId, p.toDomainCoordinate())
+                    // 3) Disparo + snapshots consistentes bajo el mismo lock
+                    val outcome = games.shootAndSnapshot(gameId, p.toDomainCoordinate())
 
-                    // 4) Broadcast del estado a ambos
+                    // 4) Broadcast del estado a ambos usando snapshots (sin volver a consultar games)
                     val out = mutableListOf<Dispatch>()
-                    out.addAll(broadcastState(room, env, gameId))
+                    out.addAll(
+                        broadcastStateFromSnapshots(
+                            room = room,
+                            req = env,
+                            gameId = gameId,
+                            p1State = outcome.p1State,
+                            p2State = outcome.p2State
+                        )
+                    )
 
                     // 5) Si terminó, GAME_OVER
-                    if (games.isOver(gameId)) {
-                        val stateP1 = games.getGameState(gameId, Game.Player.P1)
-                        val winner = stateP1.winner
-                        if (winner != null) {
-                            out.addAll(broadcastGameOver(room, env, gameId, winner))
-                        }
+                    if (outcome.isOver && outcome.winner != null) {
+                        out.addAll(broadcastGameOver(room, env, gameId, outcome.winner))
                     }
 
                     out
                 }
-
 
                 // Handshake se maneja en ClientSession
                 is Hello, is Welcome, is ErrorMsg ->
@@ -140,6 +145,38 @@ class MessageRouter(
             requestId = req.requestId,
             gameId = gameId.value,
             payload = GameStateEvent(gameId = gameId.value, state = p2State)
+        )
+
+        val p1 = room.players.getOrNull(0)
+        val p2 = room.players.getOrNull(1)
+
+        val list = mutableListOf<Dispatch>()
+        if (p1 != null) list += Dispatch(p1, p1Env)
+        if (p2 != null) list += Dispatch(p2, p2Env)
+        return list
+    }
+
+    private fun broadcastStateFromSnapshots(
+        room: Room,
+        req: Envelope,
+        gameId: GameId,
+        p1State: GameState,
+        p2State: GameState
+    ): List<Dispatch> {
+        val p1Dto = p1State.toProtocol()
+        val p2Dto = p2State.toProtocol()
+
+        val p1Env = Envelope(
+            v = req.v,
+            requestId = req.requestId,
+            gameId = gameId.value,
+            payload = GameStateEvent(gameId = gameId.value, state = p1Dto)
+        )
+        val p2Env = Envelope(
+            v = req.v,
+            requestId = req.requestId,
+            gameId = gameId.value,
+            payload = GameStateEvent(gameId = gameId.value, state = p2Dto)
         )
 
         val p1 = room.players.getOrNull(0)

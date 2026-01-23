@@ -5,6 +5,7 @@ import com.mario.hlf.protocol.Envelope
 import com.mario.hlf.protocol.ProtocolJson
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.IOException
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
 
@@ -18,6 +19,7 @@ class ConnectionRegistry {
             val bytes = json.toByteArray(Charsets.UTF_8)
             writeMutex.withLock {
                 Framing.writeFrame(out, bytes)
+                // opcional: out.flush() si tu Framing no lo hace; normalmente no hace falta
             }
         }
     }
@@ -32,16 +34,44 @@ class ConnectionRegistry {
         conns.remove(clientId.value)
     }
 
-    suspend fun sendTo(clientId: ClientId, env: Envelope) {
-        conns[clientId.value]?.send(env)
+    /**
+     * @return true si se envió, false si no había conexión o falló el envío.
+     * Si falla el envío, se hace unregister del clientId.
+     */
+    suspend fun sendTo(clientId: ClientId, env: Envelope): Boolean {
+        val conn = conns[clientId.value] ?: return false
+        return try {
+            conn.send(env)
+            true
+        } catch (_: IOException) {
+            unregister(clientId)
+            false
+        } catch (_: Throwable) {
+            // Por seguridad: no queremos tumbar el server por un fallo de envío inesperado
+            unregister(clientId)
+            false
+        }
     }
 
+    /**
+     * Broadcast típico: 1 envelope a muchos clientes.
+     * Devuelve cuántos envíos han tenido éxito.
+     */
+    suspend fun broadcast(clientIds: List<ClientId>, env: Envelope): Int {
+        var ok = 0
+        for (cid in clientIds) {
+            if (sendTo(cid, env)) ok++
+        }
+        return ok
+    }
+
+    /**
+     * Envío paralelo estricto: clientIds[i] recibe envs[i].
+     */
     suspend fun sendToMany(clientIds: List<ClientId>, envs: List<Envelope>) {
-        // envs y clientIds suelen ir en paralelo; si no, se manda cada env a todos
-        if (envs.size == clientIds.size) {
-            for (i in clientIds.indices) sendTo(clientIds[i], envs[i])
-        } else {
-            for (cid in clientIds) for (env in envs) sendTo(cid, env)
+        require(clientIds.size == envs.size) { "clientIds y envs deben tener el mismo tamaño" }
+        for (i in clientIds.indices) {
+            sendTo(clientIds[i], envs[i])
         }
     }
 }

@@ -7,4 +7,8 @@ val ProtocolJson: Json = Json {
     encodeDefaults = true
     explicitNulls = false
     classDiscriminator = "_t"
+
+    // Robustez "versión final"
+    isLenient = true
+    coerceInputValues = true
 }

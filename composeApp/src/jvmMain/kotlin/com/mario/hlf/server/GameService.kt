@@ -22,10 +22,10 @@ import java.util.concurrent.ConcurrentHashMap
  * Nota: el dominio ya gestiona reglas; aquí solo gestionamos lifecycle + concurrencia.
  */
 class GameService(
-    private val startGame: StartGameUseCase = StartGameUseCase(),
-    private val placeShip: PlaceShipUseCase = PlaceShipUseCase(),
-    private val shoot: ShootUseCase = ShootUseCase(),
-    private val getState: GetGameStateUseCase = GetGameStateUseCase(),
+    private val startGameUseCase: StartGameUseCase = StartGameUseCase(),
+    private val placeShipUseCase: PlaceShipUseCase = PlaceShipUseCase(),
+    private val shootUseCase: ShootUseCase = ShootUseCase(),
+    private val getStateUseCase: GetGameStateUseCase = GetGameStateUseCase(),
 ) {
     private data class Entry(
         var game: Game? = null,
@@ -47,7 +47,7 @@ class GameService(
         val entry = entryOf(gameId)
         return entry.mutex.withLock {
             check(entry.game == null) { "Game already started for gameId=${gameId.value}" }
-            val g = startGame.invoke(boardSize = boardSize, allowAdjacency = allowAdjacency)
+            val g = startGameUseCase.invoke(boardSize = boardSize, allowAdjacency = allowAdjacency)
             entry.game = g
             g
         }
@@ -63,17 +63,21 @@ class GameService(
         val entry = entryOf(gameId)
         return entry.mutex.withLock {
             val g = entry.game ?: error("Game not started for gameId=${gameId.value}")
-            val updated = placeShip.invoke(g, player, start, type, orientation)
+            val updated = placeShipUseCase.invoke(g, player, start, type, orientation)
             entry.game = updated
             updated
         }
     }
 
+    /**
+     * Mantener para compatibilidad (puede seguir siendo útil en tests internos).
+     * OJO: no devuelve snapshots; solo ejecuta el disparo.
+     */
     suspend fun shoot(gameId: GameId, target: Coordinate): ShotResult {
         val entry = entryOf(gameId)
         return entry.mutex.withLock {
             val g = entry.game ?: error("Game not started for gameId=${gameId.value}")
-            shoot.invoke(g, target)
+            shootUseCase.invoke(g, target)
         }
     }
 
@@ -81,7 +85,7 @@ class GameService(
         val entry = entryOf(gameId)
         return entry.mutex.withLock {
             val g = entry.game ?: error("Game not started for gameId=${gameId.value}")
-            getState.invoke(g, viewer)
+            getStateUseCase.invoke(g, viewer)
         }
     }
 
@@ -93,6 +97,38 @@ class GameService(
         return entry.mutex.withLock {
             val g = entry.game ?: return@withLock false
             g.phase == Game.Phase.OVER
+        }
+    }
+
+    data class ShootOutcome(
+        val p1State: GameState,
+        val p2State: GameState,
+        val isOver: Boolean,
+        val winner: Game.Player?
+    )
+
+    /**
+     * Disparo + snapshots consistentes bajo el MISMO lock.
+     * Esto evita race conditions (estado mezclado) en el router.
+     */
+    suspend fun shootAndSnapshot(gameId: GameId, target: Coordinate): ShootOutcome {
+        val entry = entryOf(gameId)
+        return entry.mutex.withLock {
+            val g = entry.game ?: error("Game not started for gameId=${gameId.value}")
+
+            // Ejecuta disparo (Game es mutable)
+            shootUseCase.invoke(g, target)
+
+            // Snapshots consistentes bajo lock
+            val p1 = getStateUseCase.invoke(g, Game.Player.P1)
+            val p2 = getStateUseCase.invoke(g, Game.Player.P2)
+
+            ShootOutcome(
+                p1State = p1,
+                p2State = p2,
+                isOver = (g.phase == Game.Phase.OVER),
+                winner = g.winner
+            )
         }
     }
 }

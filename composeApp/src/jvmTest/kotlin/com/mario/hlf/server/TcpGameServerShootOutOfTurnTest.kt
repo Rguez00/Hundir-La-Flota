@@ -8,17 +8,20 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class TcpGameServerShootBroadcastTest {
+class TcpGameServerShootOutOfTurnTest {
 
     @Test
-    fun `SHOOT in BATTLE broadcasts GAME_STATE and changes turn`() {
-        val config = ServerConfig(host = "127.0.0.1", port = 5684, maxClients = 10)
+    fun `P2 cannot SHOOT when it is not their turn`() {
+        val config = ServerConfig(host = "127.0.0.1", port = 5685, maxClients = 10)
         val server = TcpGameServer(config)
         server.start()
 
+        var s1: Socket? = null
+        var s2: Socket? = null
+
         try {
-            val s1 = Socket("127.0.0.1", 5684)
-            val s2 = Socket("127.0.0.1", 5684)
+            s1 = Socket("127.0.0.1", 5685)
+            s2 = Socket("127.0.0.1", 5685)
 
             val gameId1 = hello(s1, "P1")
             val gameId2 = hello(s2, "P2")
@@ -37,7 +40,7 @@ class TcpGameServerShootBroadcastTest {
             readState(s1)
             readState(s2)
 
-            // Colocamos flotas completas para entrar en BATTLE
+            // Completar placement para entrar en BATTLE (turno debe ser P1)
             placeAll(sender = s1, other = s2, gameId = gameId1, player = PlayerId.P1, startRow = 0)
             val last = placeAll(sender = s2, other = s1, gameId = gameId1, player = PlayerId.P2, startRow = 1)
 
@@ -46,42 +49,37 @@ class TcpGameServerShootBroadcastTest {
             assertEquals(PlayerId.P1, last.senderLast.currentTurn)
             assertEquals(PlayerId.P1, last.otherLast.currentTurn)
 
-            // SHOOT de P1 a una celda donde sabemos que P2 tiene barco (row=1,col=0)
+            // P2 intenta disparar cuando NO es su turno -> debe recibir ERROR FORBIDDEN
             send(
-                s1, Envelope(
+                s2, Envelope(
                     v = 1,
-                    requestId = "shoot-p1",
+                    requestId = "shoot-p2-out-of-turn",
                     gameId = gameId1,
                     payload = Shoot(
                         gameId = gameId1,
-                        player = PlayerId.P1,
-                        row = 1,
+                        player = PlayerId.P2,
+                        row = 0,
                         col = 0
                     )
                 )
             )
 
-            // broadcast a ambos
-            val afterP1 = readState(s1)
-            val afterP2 = readState(s2)
+            val respP2 = read(s2, 1500)
+            assertTrue(respP2.payload is ErrorMsg)
+            val err = respP2.payload as ErrorMsg
+            assertEquals("FORBIDDEN", err.code)
 
-            // turno cambia a P2
-            assertEquals(PlayerId.P2, afterP1.currentTurn)
-            assertEquals(PlayerId.P2, afterP2.currentTurn)
+            // Y MUY IMPORTANTE: NO debe haber broadcast a P1
+            assertNoMessage(s1, 250)
 
-            // P1 ve el tablero del oponente con HIT en (1,0)
-            // opponent.cells[row][col]
-            val cell = afterP1.opponent.cells[1][0]
-            assertEquals(CellViewId.HIT, cell)
-
-            s1.close()
-            s2.close()
         } finally {
+            try { s1?.close() } catch (_: Throwable) {}
+            try { s2?.close() } catch (_: Throwable) {}
             server.stop()
         }
     }
 
-    // ---------- helpers (copiados del PlacementToBattleTest para consistencia) ----------
+    // ---------- helpers (mismo patrón que PlacementToBattleTest) ----------
 
     private data class LastStates(
         val senderLast: GameStateDto,
@@ -176,6 +174,23 @@ class TcpGameServerShootBroadcastTest {
             return ProtocolJson.decodeFromString(Envelope.serializer(), json)
         } catch (e: java.net.SocketTimeoutException) {
             throw AssertionError("Timeout waiting for server message (${timeoutMs}ms)")
+        } finally {
+            socket.soTimeout = prev
+        }
+    }
+
+    private fun assertNoMessage(socket: Socket, timeoutMs: Int) {
+        val prev = socket.soTimeout
+        socket.soTimeout = timeoutMs
+        try {
+            val frame = Framing.readFrame(socket.getInputStream())
+            if (frame != null) {
+                val json = frame.toString(Charsets.UTF_8)
+                val env = ProtocolJson.decodeFromString(Envelope.serializer(), json)
+                throw AssertionError("Expected no message, but received: ${env.payload::class.simpleName}")
+            }
+        } catch (_: java.net.SocketTimeoutException) {
+            // OK: no llegó nada
         } finally {
             socket.soTimeout = prev
         }

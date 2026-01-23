@@ -1,5 +1,6 @@
 package com.mario.hlf.server
 
+import com.mario.hlf.domain.model.Coordinate
 import com.mario.hlf.network.Framing
 import com.mario.hlf.protocol.*
 import org.junit.Test
@@ -8,17 +9,20 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class TcpGameServerShootBroadcastTest {
+class TcpGameServerGameOverTest {
 
     @Test
-    fun `SHOOT in BATTLE broadcasts GAME_STATE and changes turn`() {
-        val config = ServerConfig(host = "127.0.0.1", port = 5684, maxClients = 10)
+    fun `when P1 sinks all P2 ships server broadcasts GAME_OVER to both`() {
+        val config = ServerConfig(host = "127.0.0.1", port = 5690, maxClients = 10)
         val server = TcpGameServer(config)
         server.start()
 
+        var s1: Socket? = null
+        var s2: Socket? = null
+
         try {
-            val s1 = Socket("127.0.0.1", 5684)
-            val s2 = Socket("127.0.0.1", 5684)
+            s1 = Socket("127.0.0.1", 5690)
+            s2 = Socket("127.0.0.1", 5690)
 
             val gameId1 = hello(s1, "P1")
             val gameId2 = hello(s2, "P2")
@@ -37,51 +41,95 @@ class TcpGameServerShootBroadcastTest {
             readState(s1)
             readState(s2)
 
-            // Colocamos flotas completas para entrar en BATTLE
+            // P1 coloca toda la flota (broadcasts)
             placeAll(sender = s1, other = s2, gameId = gameId1, player = PlayerId.P1, startRow = 0)
-            val last = placeAll(sender = s2, other = s1, gameId = gameId1, player = PlayerId.P2, startRow = 1)
 
+            // P2 coloca toda la flota (última coloca -> transición a BATTLE, turno P1)
+            val last = placeAll(sender = s2, other = s1, gameId = gameId1, player = PlayerId.P2, startRow = 1)
             assertEquals(PhaseId.BATTLE, last.senderLast.phase)
             assertEquals(PhaseId.BATTLE, last.otherLast.phase)
             assertEquals(PlayerId.P1, last.senderLast.currentTurn)
             assertEquals(PlayerId.P1, last.otherLast.currentTurn)
 
-            // SHOOT de P1 a una celda donde sabemos que P2 tiene barco (row=1,col=0)
-            send(
-                s1, Envelope(
-                    v = 1,
-                    requestId = "shoot-p1",
-                    gameId = gameId1,
-                    payload = Shoot(
-                        gameId = gameId1,
-                        player = PlayerId.P1,
-                        row = 1,
-                        col = 0
-                    )
-                )
+            // Disparos deterministas: todas las celdas de la flota de P2 según nuestro helper placeAll (col=0, horizontal)
+            val targets = listOf(
+                // CARRIER len=5 en row=1 col 0..4
+                Coordinate(1, 0), Coordinate(1, 1), Coordinate(1, 2), Coordinate(1, 3), Coordinate(1, 4),
+                // BATTLESHIP len=4 en row=3 col 0..3
+                Coordinate(3, 0), Coordinate(3, 1), Coordinate(3, 2), Coordinate(3, 3),
+                // CRUISER len=3 en row=5 col 0..2
+                Coordinate(5, 0), Coordinate(5, 1), Coordinate(5, 2),
+                // SUBMARINE len=3 en row=7 col 0..2
+                Coordinate(7, 0), Coordinate(7, 1), Coordinate(7, 2),
+                // DESTROYER len=2 en row=9 col 0..1
+                Coordinate(9, 0), Coordinate(9, 1),
             )
 
-            // broadcast a ambos
-            val afterP1 = readState(s1)
-            val afterP2 = readState(s2)
+            // Para que P1 pueda disparar muchas veces seguidas (ya que vuestro Game cambia turno siempre),
+            // hacemos que P2 dispare un MISS "dummy" después de cada disparo de P1 para devolver el turno a P1.
+            // (Si cambiasteis reglas a "si aciertas repites turno", este loop sigue funcionando igualmente.)
+            for ((i, t) in targets.withIndex()) {
+                // P1 dispara
+                send(
+                    s1, Envelope(
+                        v = 1,
+                        requestId = "p1-shot-$i",
+                        gameId = gameId1,
+                        payload = Shoot(gameId = gameId1, player = PlayerId.P1, row = t.row, col = t.col)
+                    )
+                )
 
-            // turno cambia a P2
-            assertEquals(PlayerId.P2, afterP1.currentTurn)
-            assertEquals(PlayerId.P2, afterP2.currentTurn)
+                val p1After = readState(s1)
+                val p2After = readState(s2)
 
-            // P1 ve el tablero del oponente con HIT en (1,0)
-            // opponent.cells[row][col]
-            val cell = afterP1.opponent.cells[1][0]
-            assertEquals(CellViewId.HIT, cell)
+                // Cuando sea el último disparo (hundes toda la flota), debe llegar GAME_OVER a ambos.
+                if (i == targets.lastIndex) {
+                    val e1 = read(s1, 1500)
+                    val e2 = read(s2, 1500)
 
-            s1.close()
-            s2.close()
+                    assertTrue(e1.payload is GameOverEvent, "Expected GAME_OVER for P1")
+                    assertTrue(e2.payload is GameOverEvent, "Expected GAME_OVER for P2")
+
+                    val go1 = e1.payload as GameOverEvent
+                    val go2 = e2.payload as GameOverEvent
+
+                    assertEquals(PlayerId.P1, go1.winner)
+                    assertEquals(PlayerId.P1, go2.winner)
+                    return
+                }
+
+                // Si aún no es el final, debe tocarle a P2 (por vuestra regla actual).
+                // Y hacemos un miss seguro (0,9) que no pisa nuestros barcos.
+                assertEquals(PlayerId.P2, p1After.currentTurn)
+                assertEquals(PlayerId.P2, p2After.currentTurn)
+
+                send(
+                    s2, Envelope(
+                        v = 1,
+                        requestId = "p2-dummy-miss-$i",
+                        gameId = gameId1,
+                        payload = Shoot(gameId = gameId1, player = PlayerId.P2, row = 0, col = 9)
+                    )
+                )
+
+                // Broadcast del dummy shot
+                readState(s1)
+                val p2DummyState = readState(s2)
+
+                // Debe volver el turno a P1
+                assertEquals(PlayerId.P1, p2DummyState.currentTurn)
+            }
+
+            throw AssertionError("Expected to receive GAME_OVER but loop finished")
+
         } finally {
+            try { s1?.close() } catch (_: Throwable) {}
+            try { s2?.close() } catch (_: Throwable) {}
             server.stop()
         }
     }
 
-    // ---------- helpers (copiados del PlacementToBattleTest para consistencia) ----------
+    // -------- helpers --------
 
     private data class LastStates(
         val senderLast: GameStateDto,

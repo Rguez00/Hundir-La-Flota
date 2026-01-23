@@ -1,9 +1,12 @@
 package com.mario.hlf.server
 
 import kotlinx.coroutines.*
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.net.SocketException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 class TcpGameServer(
     private val config: ServerConfig,
@@ -15,6 +18,7 @@ class TcpGameServer(
     private val router: MessageRouter = MessageRouter(sessions, rooms, games)
 ) {
     private val running = AtomicBoolean(false)
+    private val activeClients = AtomicInteger(0)
     private var serverSocket: ServerSocket? = null
 
     fun start() {
@@ -32,12 +36,15 @@ class TcpGameServer(
                 while (running.get()) {
                     val socket = ss.accept()
 
-                    // guard maxClients
-                    if (sessions.count() >= config.maxClients) {
+                    // guard maxClients (usa contador real de activos)
+                    if (activeClients.get() >= config.maxClients) {
                         log("Rejecting client: SERVER_FULL")
-                        socket.close()
+                        try { socket.close() } catch (_: Throwable) {}
                         continue
                     }
+
+                    // Reservamos plaza antes de lanzar la sesión
+                    activeClients.incrementAndGet()
 
                     val session = sessions.create()
                     log("Client connected: ${socket.inetAddress.hostAddress}:${socket.port} -> clientId=${session.clientId.value}")
@@ -53,17 +60,25 @@ class TcpGameServer(
                                 connections = connections,
                                 router = router
                             ).run()
+                        } catch (t: Throwable) {
+                            // Si quieres, aquí puedes loguear errores por cliente (sin tumbar el server)
+                            log("Client session error (clientId=${session.clientId.value}): ${t.message}")
                         } finally {
-                            sessions.remove(session.clientId)
-                            rooms.removeClient(session.clientId)
+                            // Cleanup aquí SOLO del contador.
+                            // La limpieza de sessions/rooms/connections vive en ClientSession.finally (versión final).
+                            activeClients.decrementAndGet()
                             log("Client disconnected: clientId=${session.clientId.value}")
                         }
                     }
                 }
+            } catch (e: SocketException) {
+                // típico cuando paramos y cerramos el ServerSocket
+                if (running.get()) log("Server socket error: ${e.message}")
+            } catch (e: IOException) {
+                if (running.get()) log("Server IO error: ${e.message}")
             } catch (t: Throwable) {
                 if (running.get()) log("Server accept loop error: ${t.message}")
             } finally {
-                // si el loop cae, cerramos el socket por seguridad
                 try { ss.close() } catch (_: Throwable) {}
                 log("Server stopped.")
             }
@@ -71,8 +86,8 @@ class TcpGameServer(
     }
 
     fun stop() {
-        running.set(false)
-        serverSocket?.close()
+        if (!running.getAndSet(false)) return
+        try { serverSocket?.close() } catch (_: Throwable) {}
         scope.cancel()
     }
 

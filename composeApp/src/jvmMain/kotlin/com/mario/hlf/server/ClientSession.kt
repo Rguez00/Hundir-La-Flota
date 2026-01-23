@@ -42,14 +42,21 @@ class ClientSession(
                         continue
                     }
 
-                    // Resto de mensajes -> router (fase 5.3.2)
+                    // Resto de mensajes -> router (fase 5.3+)
                     val dispatches = router.handle(clientId, env)
                     for (d in dispatches) {
                         connections.sendTo(d.target, d.envelope)
                     }
                 }
             } finally {
+                // cleanup completo (evita leaks)
                 connections.unregister(clientId)
+
+                // OJO: si tu RoomRegistry.removeClient es suspend (como te pasé), esto compila tal cual.
+                // Si aún lo tienes no-suspend, quita el suspend y funcionará igual.
+                rooms.removeClient(clientId)
+
+                sessions.remove(clientId)
             }
         }
     }
@@ -94,7 +101,6 @@ class ClientSession(
         )
     }
 
-    // (Opcional) Si quieres mantenerlo, pero ahora mismo no lo usamos:
     @Suppress("unused")
     private fun unsupported(env: Envelope, msg: String): Envelope =
         Envelope(
