@@ -12,7 +12,8 @@ class MessageRouter(
     private val sessions: SessionRegistry,
     private val rooms: RoomRegistry,
     private val games: GameService,
-    private val aiPlayers: MutableMap<String, AIPlayer> = mutableMapOf() // ✅ NUEVO: Gestión de IAs
+    private val aiPlayers: MutableMap<String, AIPlayer> = mutableMapOf(),
+    private val records: RecordsManager? = null
 ) {
 
     suspend fun handle(clientId: ClientId, env: Envelope): List<Dispatch> {
@@ -151,6 +152,7 @@ class MessageRouter(
         // 5) Si terminó, GAME_OVER
         if (outcome.isOver && outcome.winner != null) {
             dispatches += broadcastGameOver(room, env, gameId, outcome.winner, GameOverReason.ALL_SHIPS_SUNK)
+            recordGameResult(room, gameId, outcome.winner, outcome.p1State, outcome.p2State)
             cleanupAI(gameId)
             return dispatches
         }
@@ -195,6 +197,7 @@ class MessageRouter(
         // Si la IA ganó, GAME_OVER
         if (outcome.isOver && outcome.winner != null) {
             dispatches += broadcastGameOver(room, originalEnv, gameId, outcome.winner, GameOverReason.ALL_SHIPS_SUNK)
+            recordGameResult(room, gameId, outcome.winner, outcome.p1State, outcome.p2State)
             cleanupAI(gameId)
         }
 
@@ -349,6 +352,64 @@ class MessageRouter(
         )
 
         return room.players.map { Dispatch(it, env) }
+    }
+
+    /**
+     * ✅ NUEVO: Registrar resultado de partida en records
+     */
+    private fun recordGameResult(
+        room: Room,
+        gameId: GameId,
+        winner: Game.Player,
+        p1State: GameState,
+        p2State: GameState
+    ) {
+        if (records == null) return
+
+        // Obtener nombres de jugadores
+        val p1ClientId = room.players.getOrNull(0)
+        val p2ClientId = room.players.getOrNull(1)
+
+        val p1Session = p1ClientId?.let { sessions.get(it) }
+        val p2Session = p2ClientId?.let { sessions.get(it) }
+
+        val player1Name = p1Session?.playerName ?: "Unknown"
+        val player2Name = if (room.mode == GameModeId.PVE) null else p2Session?.playerName ?: "Unknown"
+
+        val winnerName = when (winner) {
+            Game.Player.P1 -> player1Name
+            Game.Player.P2 -> player2Name ?: "AI"
+        }
+
+        // Calcular estadísticas (simplificado - asume que son de P1)
+        val totalShots = p1State.opponent.cells.sumOf { row ->
+            row.count { cell ->
+                cell == com.mario.hlf.domain.usecase.dto.CellView.HIT ||
+                cell == com.mario.hlf.domain.usecase.dto.CellView.MISS
+            }
+        }
+
+        val totalHits = p1State.opponent.cells.sumOf { row ->
+            row.count { cell -> cell == com.mario.hlf.domain.usecase.dto.CellView.HIT }
+        }
+
+        // Aproximar turnos (total de disparos en ambos tableros dividido por 2)
+        val turns = (totalShots + 1) / 2
+
+        try {
+            records.recordGameResult(
+                player1Name = player1Name,
+                player2Name = player2Name,
+                winner = winnerName,
+                mode = room.mode,
+                totalShots = totalShots,
+                totalHits = totalHits,
+                turns = turns
+            )
+            println("[ROUTER] 📊 Records actualizados: $winnerName ganó en modo ${room.mode}")
+        } catch (e: Exception) {
+            println("[ROUTER] ❌ Error actualizando records: ${e.message}")
+        }
     }
 }
 

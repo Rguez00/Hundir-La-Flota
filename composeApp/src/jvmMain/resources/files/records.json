@@ -1,0 +1,66 @@
+{
+  "players": {
+    "Demo": {
+      "pvp": {
+        "wins": 5,
+        "losses": 3,
+        "draws": 0,
+        "bestStreak": 3,
+        "currentStreak": 1,
+        "bestAccuracy": 0.68,
+        "avgAccuracy": 0.54,
+        "fastestWinTurns": 28,
+        "totalGames": 8,
+        "totalShots": 245,
+        "totalHits": 132
+      },
+      "pve": {
+        "wins": 12,
+        "losses": 4,
+        "draws": 0,
+        "bestStreak": 7,
+        "currentStreak": 2,
+        "bestAccuracy": 0.72,
+        "avgAccuracy": 0.61,
+        "fastestWinTurns": 22,
+        "totalGames": 16,
+        "totalShots": 412,
+        "totalHits": 251
+      },
+      "lastUpdated": "2026-01-24T00:00:00"
+    },
+    "Player1": {
+      "pvp": {
+        "wins": 2,
+        "losses": 1,
+        "draws": 0,
+        "bestStreak": 2,
+        "currentStreak": 0,
+        "bestAccuracy": 0.58,
+        "avgAccuracy": 0.52,
+        "fastestWinTurns": 35,
+        "totalGames": 3,
+        "totalShots": 98,
+        "totalHits": 51
+      },
+      "pve": {
+        "wins": 8,
+        "losses": 2,
+        "draws": 0,
+        "bestStreak": 5,
+        "currentStreak": 3,
+        "bestAccuracy": 0.65,
+        "avgAccuracy": 0.59,
+        "fastestWinTurns": 26,
+        "totalGames": 10,
+        "totalShots": 267,
+        "totalHits": 157
+      },
+      "lastUpdated": "2026-01-23T18:30:00"
+    }
+  },
+  "meta": {
+    "version": 1,
+    "lastBackup": "2026-01-24T00:00:00"
+  }
+}

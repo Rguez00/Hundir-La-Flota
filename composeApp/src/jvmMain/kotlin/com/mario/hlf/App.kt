@@ -8,10 +8,7 @@ import com.mario.hlf.protocol.PlayerId
 import com.mario.hlf.protocol.RoomStatusId
 import com.mario.hlf.ui.GameController
 import com.mario.hlf.ui.GameUiState
-import com.mario.hlf.ui.screens.BattleScreen
-import com.mario.hlf.ui.screens.LobbyScreen
-import com.mario.hlf.ui.screens.MainMenuScreen
-import com.mario.hlf.ui.screens.PlacementScreen
+import com.mario.hlf.ui.screens.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,6 +29,8 @@ fun App(onExit: () -> Unit) {
                     onConnect = { host, port, name, mode ->
                         controller.connect(host, port, name, mode)
                     },
+                    onViewRecords = { controller.showRecords() },
+                    onViewSettings = { controller.showSettings() },
                     onExit = onExit
                 )
             }
@@ -135,6 +134,20 @@ fun App(onExit: () -> Unit) {
                     showStart = false,
                     onStart = {},
                     onDisconnect = { controller.disconnect() }
+                )
+            }
+
+            is GameUiState.ViewingRecords -> {
+                RecordsScreen(
+                    records = s.records,
+                    onBack = { controller.backToMainMenu() }
+                )
+            }
+
+            is GameUiState.ViewingSettings -> {
+                SettingsScreen(
+                    serverConfig = s.serverConfig,
+                    onBack = { controller.backToMainMenu() }
                 )
             }
         }

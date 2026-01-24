@@ -17,8 +17,9 @@ class TcpGameServer(
     private val rooms: RoomRegistry = RoomRegistry(),
     private val connections: ConnectionRegistry = ConnectionRegistry(),
     private val games: GameService = GameService(),
-    private val router: MessageRouter = MessageRouter(sessions, rooms, games)
+    private val records: RecordsManager = RecordsManager("records.json")
 ) {
+    private val router: MessageRouter = MessageRouter(sessions, rooms, games, records = records)
     private val running = AtomicBoolean(false)
     private var serverSocket: ServerSocket? = null
     private var acceptJob: Job? = null
@@ -74,7 +75,8 @@ class TcpGameServer(
                                 rooms = rooms,
                                 connections = connections,
                                 router = router,
-                                aiPlayers = aiPlayers // ✅ AÑADIR ESTA LÍNEA
+                                aiPlayers = aiPlayers,
+                                records = records
                             ).run()
                         } finally {
                             clientSockets.remove(clientId.value)

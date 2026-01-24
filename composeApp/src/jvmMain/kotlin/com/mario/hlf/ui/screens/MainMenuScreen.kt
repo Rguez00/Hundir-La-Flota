@@ -14,6 +14,8 @@ fun MainMenuScreen(
     defaultPort: Int,
     defaultName: String,
     onConnect: (host: String, port: Int, name: String, mode: GameModeId) -> Unit,
+    onViewRecords: (() -> Unit)? = null,
+    onViewSettings: (() -> Unit)? = null,
     onExit: () -> Unit
 ) {
     var host by remember { mutableStateOf(defaultHost) }
@@ -115,7 +117,7 @@ fun MainMenuScreen(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // Botones de acción
+        // Botones de acción principal
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth()
@@ -136,6 +138,32 @@ fun MainMenuScreen(
                 modifier = Modifier.weight(1f)
             ) {
                 Text("Salir")
+            }
+        }
+
+        // Botones secundarios (Records y Settings)
+        if (onViewRecords != null || onViewSettings != null) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (onViewRecords != null) {
+                    OutlinedButton(
+                        onClick = onViewRecords,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("📊 Ver Records")
+                    }
+                }
+
+                if (onViewSettings != null) {
+                    OutlinedButton(
+                        onClick = onViewSettings,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("⚙️ Configuración")
+                    }
+                }
             }
         }
     }

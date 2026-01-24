@@ -70,6 +70,10 @@ class GameController(
                 currentRoomStatus = roomStatus
                 currentMode = confirmedMode
 
+                // ✅ NUEVO: Guardar records y config para navegación
+                saveRecords(welcome.records)
+                saveServerConfig(welcome.config)
+
                 // ✅ lectura infinita para el loop
                 c.setReadTimeout(0)
 
@@ -317,5 +321,55 @@ class GameController(
         is GameUiState.Connected -> state.mode
         is GameUiState.InGame -> state.mode
         else -> currentMode
+    }
+
+    // ========== NAVEGACIÓN ==========
+
+    private var savedRecords: RecordsDto? = null
+    private var savedServerConfig: ServerConfigDto? = null
+
+    /**
+     * ✅ NUEVO: Guardar records recibidos en el handshake
+     */
+    fun saveRecords(records: RecordsDto) {
+        savedRecords = records
+    }
+
+    /**
+     * ✅ NUEVO: Guardar configuración del servidor
+     */
+    fun saveServerConfig(config: ServerConfigDto) {
+        savedServerConfig = config
+    }
+
+    /**
+     * ✅ NUEVO: Navegar a pantalla de records
+     */
+    fun showRecords() {
+        scope.launch(Dispatchers.Main) {
+            _uiState.value = GameUiState.ViewingRecords(
+                records = savedRecords ?: RecordsDto()
+            )
+        }
+    }
+
+    /**
+     * ✅ NUEVO: Navegar a pantalla de configuración
+     */
+    fun showSettings() {
+        scope.launch(Dispatchers.Main) {
+            _uiState.value = GameUiState.ViewingSettings(
+                serverConfig = savedServerConfig
+            )
+        }
+    }
+
+    /**
+     * ✅ NUEVO: Volver al menú principal desde cualquier pantalla
+     */
+    fun backToMainMenu() {
+        scope.launch(Dispatchers.Main) {
+            _uiState.value = GameUiState.Disconnected
+        }
     }
 }

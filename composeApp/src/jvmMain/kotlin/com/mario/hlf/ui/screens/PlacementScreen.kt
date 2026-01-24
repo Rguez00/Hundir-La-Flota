@@ -132,7 +132,7 @@ fun PlacementScreen(
 @Composable
 private fun PlacementProgress(state: GameStateDto, me: PlayerId) {
     // Contar barcos colocados (células con SHIP en self)
-    val totalShips = 5 // CARRIER, BATTLESHIP, CRUISER, SUBMARINE, DESTROYER
+    val totalShips = 5 // Flota clásica: 5 barcos
     val placedCount = countPlacedShips(state.self)
 
     Column(horizontalAlignment = Alignment.End) {
@@ -174,7 +174,7 @@ private fun ShipSelector(
                 enabled = !isPlaced,
                 label = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("${ship.name} (${getShipSize(ship)})")
+                        Text(getShipDisplayName(ship))
                         if (isPlaced) {
                             Spacer(Modifier.width(4.dp))
                             Text("✓", color = MaterialTheme.colorScheme.primary)
@@ -184,6 +184,14 @@ private fun ShipSelector(
             )
         }
     }
+}
+
+private fun getShipDisplayName(ship: ShipTypeId): String = when (ship) {
+    ShipTypeId.CARRIER -> "🚢 Portaaviones (5)"
+    ShipTypeId.BATTLESHIP -> "⚓ Acorazado (4)"
+    ShipTypeId.CRUISER -> "🛥️ Crucero (3)"
+    ShipTypeId.SUBMARINE -> "🚤 Submarino (3)"
+    ShipTypeId.DESTROYER -> "⛵ Destructor (2)"
 }
 
 // ========== HELPERS ==========

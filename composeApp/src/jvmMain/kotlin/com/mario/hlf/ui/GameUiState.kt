@@ -1,16 +1,26 @@
 package com.mario.hlf.ui
 
-import com.mario.hlf.protocol.GameModeId
-import com.mario.hlf.protocol.GameOverEvent
-import com.mario.hlf.protocol.GameStateDto
-import com.mario.hlf.protocol.PlayerId
-import com.mario.hlf.protocol.RoomStatusId
+import com.mario.hlf.protocol.*
 
 /**
  * ✅ SIMPLIFICADO: Usar GameModeId del protocolo directamente
  */
 sealed interface GameUiState {
     data object Disconnected : GameUiState
+
+    /**
+     * ✅ NUEVO: Visualizando records
+     */
+    data class ViewingRecords(
+        val records: RecordsDto
+    ) : GameUiState
+
+    /**
+     * ✅ NUEVO: Visualizando configuración
+     */
+    data class ViewingSettings(
+        val serverConfig: ServerConfigDto?
+    ) : GameUiState
 
     data class Connecting(
         val host: String,

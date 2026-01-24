@@ -19,7 +19,8 @@ class ClientSession(
     private val rooms: RoomRegistry,
     private val connections: ConnectionRegistry,
     private val router: MessageRouter,
-    private val aiPlayers: ConcurrentHashMap<String, AIPlayer> = ConcurrentHashMap() // ✅ NUEVO
+    private val aiPlayers: ConcurrentHashMap<String, AIPlayer> = ConcurrentHashMap(),
+    private val records: RecordsManager
 ) {
     suspend fun run() {
         log("session started clientId=${clientId.value}")
@@ -164,7 +165,7 @@ class ClientSession(
                 port = config.port,
                 maxClients = config.maxClients
             ),
-            records = RecordsDto(), // ✅ TODO: Cargar records reales
+            records = records.getRecords(),
             roomId = join.roomId.value,
             slot = me,
             roomStatus = roomStatusId,
