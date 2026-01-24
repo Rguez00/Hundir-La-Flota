@@ -1,66 +1,153 @@
 {
   "players": {
-    "Demo": {
+    "Almirante_Nelson": {
       "pvp": {
-        "wins": 5,
+        "wins": 15,
         "losses": 3,
+        "draws": 0,
+        "bestStreak": 8,
+        "currentStreak": 2,
+        "bestAccuracy": 0.75,
+        "avgAccuracy": 0.68,
+        "fastestWinTurns": 18,
+        "totalGames": 18,
+        "totalShots": 423,
+        "totalHits": 287
+      },
+      "pve": {
+        "wins": 25,
+        "losses": 2,
+        "draws": 0,
+        "bestStreak": 15,
+        "currentStreak": 5,
+        "bestAccuracy": 0.82,
+        "avgAccuracy": 0.74,
+        "fastestWinTurns": 15,
+        "totalGames": 27,
+        "totalShots": 678,
+        "totalHits": 502
+      },
+      "lastUpdated": "2026-01-24T12:00:00"
+    },
+    "Capitan_Sparrow": {
+      "pvp": {
+        "wins": 12,
+        "losses": 5,
+        "draws": 0,
+        "bestStreak": 6,
+        "currentStreak": 1,
+        "bestAccuracy": 0.71,
+        "avgAccuracy": 0.63,
+        "fastestWinTurns": 22,
+        "totalGames": 17,
+        "totalShots": 389,
+        "totalHits": 245
+      },
+      "pve": {
+        "wins": 18,
+        "losses": 4,
+        "draws": 0,
+        "bestStreak": 9,
+        "currentStreak": 3,
+        "bestAccuracy": 0.78,
+        "avgAccuracy": 0.69,
+        "fastestWinTurns": 19,
+        "totalGames": 22,
+        "totalShots": 512,
+        "totalHits": 353
+      },
+      "lastUpdated": "2026-01-24T11:30:00"
+    },
+    "Drake_El_Pirata": {
+      "pvp": {
+        "wins": 10,
+        "losses": 8,
+        "draws": 0,
+        "bestStreak": 4,
+        "currentStreak": 0,
+        "bestAccuracy": 0.65,
+        "avgAccuracy": 0.58,
+        "fastestWinTurns": 25,
+        "totalGames": 18,
+        "totalShots": 445,
+        "totalHits": 258
+      },
+      "pve": {
+        "wins": 14,
+        "losses": 6,
+        "draws": 0,
+        "bestStreak": 6,
+        "currentStreak": 2,
+        "bestAccuracy": 0.70,
+        "avgAccuracy": 0.64,
+        "fastestWinTurns": 23,
+        "totalGames": 20,
+        "totalShots": 501,
+        "totalHits": 321
+      },
+      "lastUpdated": "2026-01-24T10:15:00"
+    },
+    "Barbanegra": {
+      "pvp": {
+        "wins": 8,
+        "losses": 7,
         "draws": 0,
         "bestStreak": 3,
         "currentStreak": 1,
-        "bestAccuracy": 0.68,
-        "avgAccuracy": 0.54,
-        "fastestWinTurns": 28,
-        "totalGames": 8,
-        "totalShots": 245,
-        "totalHits": 132
+        "bestAccuracy": 0.62,
+        "avgAccuracy": 0.55,
+        "fastestWinTurns": 30,
+        "totalGames": 15,
+        "totalShots": 378,
+        "totalHits": 208
       },
       "pve": {
-        "wins": 12,
-        "losses": 4,
-        "draws": 0,
-        "bestStreak": 7,
-        "currentStreak": 2,
-        "bestAccuracy": 0.72,
-        "avgAccuracy": 0.61,
-        "fastestWinTurns": 22,
-        "totalGames": 16,
-        "totalShots": 412,
-        "totalHits": 251
-      },
-      "lastUpdated": "2026-01-24T00:00:00"
-    },
-    "Player1": {
-      "pvp": {
-        "wins": 2,
-        "losses": 1,
-        "draws": 0,
-        "bestStreak": 2,
-        "currentStreak": 0,
-        "bestAccuracy": 0.58,
-        "avgAccuracy": 0.52,
-        "fastestWinTurns": 35,
-        "totalGames": 3,
-        "totalShots": 98,
-        "totalHits": 51
-      },
-      "pve": {
-        "wins": 8,
-        "losses": 2,
+        "wins": 11,
+        "losses": 5,
         "draws": 0,
         "bestStreak": 5,
-        "currentStreak": 3,
-        "bestAccuracy": 0.65,
-        "avgAccuracy": 0.59,
-        "fastestWinTurns": 26,
+        "currentStreak": 0,
+        "bestAccuracy": 0.68,
+        "avgAccuracy": 0.61,
+        "fastestWinTurns": 27,
+        "totalGames": 16,
+        "totalShots": 423,
+        "totalHits": 258
+      },
+      "lastUpdated": "2026-01-24T09:45:00"
+    },
+    "Comodoro_Perry": {
+      "pvp": {
+        "wins": 6,
+        "losses": 4,
+        "draws": 0,
+        "bestStreak": 3,
+        "currentStreak": 2,
+        "bestAccuracy": 0.60,
+        "avgAccuracy": 0.53,
+        "fastestWinTurns": 32,
         "totalGames": 10,
         "totalShots": 267,
-        "totalHits": 157
+        "totalHits": 142
       },
-      "lastUpdated": "2026-01-23T18:30:00"
+      "pve": {
+        "wins": 9,
+        "losses": 3,
+        "draws": 0,
+        "bestStreak": 4,
+        "currentStreak": 1,
+        "bestAccuracy": 0.66,
+        "avgAccuracy": 0.59,
+        "fastestWinTurns": 28,
+        "totalGames": 12,
+        "totalShots": 334,
+        "totalHits": 197
+      },
+      "lastUpdated": "2026-01-24T08:20:00"
     }
   },
   "meta": {
     "version": 1,
-    "lastBackup": "2026-01-24T00:00:00"
+    "lastBackup": "2026-01-24T12:00:00"
   }
 }

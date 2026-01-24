@@ -37,3 +37,14 @@ Thumbs.db
 
 # Compose / KMP caches
 .kotlinc/
+
+# Claude Code
+.claude/
+
+# Distribuciones compiladas (usar GitHub Releases)
+dist/
+
+# Backups
+*.zip
+*.bak
+/.git

@@ -1,12 +1,21 @@
 package com.mario.hlf.ui.screens
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.mario.hlf.protocol.*
 import com.mario.hlf.ui.components.BoardGrid
 import kotlinx.coroutines.delay
@@ -22,10 +31,27 @@ fun BattleScreen(
     onBackToLobby: () -> Unit,
     onShoot: (row: Int, col: Int) -> Unit
 ) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // ✅ Fondo espacial/oceánico
+        Image(
+            painter = painterResource("drawable/HLF_ui_bg_grid.png"),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+
+        // ✅ Overlay oscuro
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f))
+        )
+
+        // ✅ Contenido principal
+        Column(
+            modifier = Modifier.fillMaxSize().padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
         // ✅ Header con estado de turno
         if (gameOver == null && !opponentDisconnected) {
             TurnIndicator(state, me)
@@ -41,17 +67,25 @@ fun BattleScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer
-                )
+                    containerColor = Color(0xFF4A0A0A).copy(alpha = 0.9f) // Rojo oscuro
+                ),
+                shape = RoundedCornerShape(10.dp)
             ) {
                 Row(
                     modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        "⚠️ Rival desconectado - Victoria por abandono",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer
+                        "⚠️",
+                        fontSize = 24.sp
+                    )
+                    Text(
+                        "RIVAL DESCONECTADO - VICTORIA POR ABANDONO",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFFF0000),
+                        letterSpacing = 1.sp
                     )
                 }
             }
@@ -91,14 +125,36 @@ fun BattleScreen(
         // ✅ Botones
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             if (gameOver != null || opponentDisconnected) {
-                Button(onClick = onBackToLobby) {
-                    Text("🏠 Volver al Lobby")
+                Button(
+                    onClick = onBackToLobby,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF00FF00),
+                        contentColor = Color.Black
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        "🏠 Volver al Lobby",
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
                 }
             }
 
-            OutlinedButton(onClick = onDisconnect) {
-                Text("❌ Desconectar")
+            OutlinedButton(
+                onClick = onDisconnect,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = Color(0xFF00FF00)
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    "❌ Desconectar",
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
             }
+        }
         }
     }
 }
@@ -124,10 +180,11 @@ private fun TurnIndicator(state: GameStateDto, me: PlayerId) {
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = if (isMyTurn)
-                MaterialTheme.colorScheme.primaryContainer
+                Color(0xFF1A3A1A).copy(alpha = 0.9f) // Verde oscuro
             else
-                MaterialTheme.colorScheme.surfaceVariant
-        )
+                Color(0xFF0D1117).copy(alpha = 0.9f) // Gris muy oscuro
+        ),
+        shape = RoundedCornerShape(10.dp)
     ) {
         Row(
             modifier = Modifier.padding(16.dp).fillMaxWidth(),
@@ -137,19 +194,18 @@ private fun TurnIndicator(state: GameStateDto, me: PlayerId) {
             Column {
                 Text(
                     if (isMyTurn) "🎯 TU TURNO" else "⏳ Turno del Rival",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = if (isMyTurn)
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isMyTurn) Color(0xFF00FF00) else Color(0xFF00D9FF),
+                    letterSpacing = 1.sp
                 )
                 Text(
                     if (isMyTurn) "Haz click en el radar enemigo para disparar" else "Espera tu turno...",
-                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 12.sp,
                     color = if (isMyTurn)
-                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        Color(0xFF00FF00).copy(alpha = 0.7f)
                     else
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        Color(0xFF00D9FF).copy(alpha = 0.7f)
                 )
             }
 
@@ -161,19 +217,22 @@ private fun TurnIndicator(state: GameStateDto, me: PlayerId) {
                 if (isMyTurn) {
                     // Mostrar tiempo restante cuando es tu turno
                     val timeColor = when {
-                        secondsRemaining > 30 -> MaterialTheme.colorScheme.onPrimaryContainer
-                        secondsRemaining > 10 -> MaterialTheme.colorScheme.tertiary
-                        else -> MaterialTheme.colorScheme.error
+                        secondsRemaining > 30 -> Color(0xFF00FF00)
+                        secondsRemaining > 10 -> Color(0xFFFFFF00) // Amarillo
+                        else -> Color(0xFFFF0000)
                     }
 
                     Text(
                         "⏱️ ${secondsRemaining}s",
-                        style = MaterialTheme.typography.headlineSmall,
+                        fontSize = 24.sp,
                         color = timeColor,
                         fontWeight = FontWeight.Bold
                     )
                 } else {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = Color(0xFF00D9FF)
+                    )
                 }
             }
         }
@@ -191,10 +250,11 @@ private fun GameOverBanner(gameOver: GameOverEvent, me: PlayerId) {
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = if (won)
-                MaterialTheme.colorScheme.primaryContainer
+                Color(0xFF1A3A1A).copy(alpha = 0.9f) // Verde oscuro
             else
-                MaterialTheme.colorScheme.errorContainer
-        )
+                Color(0xFF4A0A0A).copy(alpha = 0.9f) // Rojo oscuro
+        ),
+        shape = RoundedCornerShape(10.dp)
     ) {
         Column(
             modifier = Modifier.padding(24.dp).fillMaxWidth(),
@@ -202,12 +262,11 @@ private fun GameOverBanner(gameOver: GameOverEvent, me: PlayerId) {
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                if (won) "🎉 ¡VICTORIA!" else "💔 Derrota",
-                style = MaterialTheme.typography.headlineMedium,
-                color = if (won)
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                else
-                    MaterialTheme.colorScheme.onErrorContainer
+                if (won) "🎉 ¡VICTORIA!" else "💔 DERROTA",
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (won) Color(0xFF00FF00) else Color(0xFFFF0000),
+                letterSpacing = 2.sp
             )
 
             Text(
@@ -219,11 +278,11 @@ private fun GameOverBanner(gameOver: GameOverEvent, me: PlayerId) {
                     GameOverReason.TIMEOUT ->
                         "Tiempo agotado"
                 },
-                style = MaterialTheme.typography.bodyMedium,
+                fontSize = 14.sp,
                 color = if (won)
-                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    Color(0xFF00FF00).copy(alpha = 0.8f)
                 else
-                    MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                    Color(0xFFFF0000).copy(alpha = 0.8f)
             )
         }
     }
@@ -245,39 +304,42 @@ private fun MoveHistory(state: GameStateDto, me: PlayerId, mode: GameModeId) {
     Card(
         modifier = Modifier.width(220.dp).fillMaxHeight(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+            containerColor = Color(0xFF0D1117).copy(alpha = 0.9f)
+        ),
+        shape = RoundedCornerShape(10.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxSize().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(
-                "📜 Historial",
-                style = MaterialTheme.typography.titleMedium,
+                "📜 HISTORIAL",
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = Color(0xFF00FF00),
+                letterSpacing = 1.sp
             )
 
-            HorizontalDivider()
+            HorizontalDivider(color = Color(0xFF00FF00).copy(alpha = 0.3f))
 
             // Sección: Tus disparos
             Text(
-                "Tus Disparos:",
-                style = MaterialTheme.typography.labelLarge,
+                "TUS DISPAROS:",
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
+                color = Color(0xFF00FF00),
+                letterSpacing = 1.sp
             )
 
             if (myShots.isEmpty()) {
                 Text(
                     "Aún no has disparado",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    fontSize = 11.sp,
+                    color = Color(0xFF00FF00).copy(alpha = 0.5f)
                 )
             } else {
                 Column(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     myShots.takeLast(10).reversed().forEach { move ->
@@ -286,25 +348,26 @@ private fun MoveHistory(state: GameStateDto, me: PlayerId, mode: GameModeId) {
                 }
             }
 
-            HorizontalDivider()
+            HorizontalDivider(color = Color(0xFF00FF00).copy(alpha = 0.3f))
 
             // Sección: Disparos del rival
             Text(
-                if (mode == GameModeId.PVE) "Disparos IA:" else "Disparos Rival:",
-                style = MaterialTheme.typography.labelLarge,
+                if (mode == GameModeId.PVE) "DISPAROS IA:" else "DISPAROS RIVAL:",
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.secondary
+                color = Color(0xFF00D9FF),
+                letterSpacing = 1.sp
             )
 
             if (opponentShots.isEmpty()) {
                 Text(
                     "Rival no ha disparado",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    fontSize = 11.sp,
+                    color = Color(0xFF00D9FF).copy(alpha = 0.5f)
                 )
             } else {
                 Column(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     opponentShots.takeLast(10).reversed().forEach { move ->
@@ -326,22 +389,22 @@ private fun MoveItem(move: Move) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            if (move.isHit) "💥" else "💨",
-            style = MaterialTheme.typography.bodyMedium
+            if (move.isHit) "💥" else "💧",
+            fontSize = 14.sp
         )
         Text(
             move.coordinate,
-            style = MaterialTheme.typography.bodySmall,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
             color = if (move.isHit)
-                MaterialTheme.colorScheme.error
+                Color(0xFFFF0000)
             else
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                Color(0xFF00D9FF)
         )
         Text(
             if (move.isHit) "Impacto" else "Agua",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            fontSize = 11.sp,
+            color = Color.White.copy(alpha = 0.6f)
         )
     }
 }
